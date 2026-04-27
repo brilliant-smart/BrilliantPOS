@@ -1,0 +1,21 @@
+# Databases
+*.sqlite*
+
+# Environment files
+.env
+.env.*
+
+# Atlassian Rovo Dev
+.rovodev/
+AGENTS.md
+AGENTS.local.md
+.rovo-dev/
+
+# Laravel specifics
+/vendor/
+/public/storage
+/public/hot
+/storage/*.key
+/config/php-cs-fixer.cache
+.phpunit.result.cache
+

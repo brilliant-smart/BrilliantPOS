@@ -1,0 +1,287 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap");
+@import 'react-datepicker/dist/react-datepicker.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Brilliant POS Retail Design System
+   By Brilliant Smart
+*/
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    overflow-x: hidden;
+  }
+
+  body {
+    overflow-x: hidden;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  :root {
+    /* Al-Khair Green Palette */
+    --background: 150 20% 98%; /* Warm white #FAFCFB */
+    --foreground: 0 0% 18%; /* Charcoal gray #2E2E2E */
+
+    --card: 150 33% 94%; /* Soft sage #E6F2EC */
+    --card-foreground: 0 0% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 18%;
+
+    /* Primary Green - CTA */
+    --primary: 150 52% 37%; /* #2F8F5B */
+    --primary-foreground: 0 0% 100%;
+
+    /* Deep Green - Headers & Trust */
+    --secondary: 150 50% 24%; /* #1F5E3B */
+    --secondary-foreground: 0 0% 100%;
+
+    /* Soft Sage Background */
+    --muted: 150 33% 94%; /* #E6F2EC */
+    --muted-foreground: 220 9% 46%; /* #6B7280 */
+
+    --accent: 150 52% 37%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Soft Gray Borders */
+    --border: 140 12% 89%; /* #E2E8E4 */
+    --input: 140 12% 89%;
+    --ring: 150 52% 37%;
+
+    --radius: 0.75rem;
+
+    /* Custom tokens */
+    --gradient-primary: linear-gradient(
+      135deg,
+      hsl(150 52% 37%),
+      hsl(150 50% 24%)
+    );
+    --gradient-hero: linear-gradient(
+      180deg,
+      hsl(150 33% 94% / 0.8),
+      hsl(150 20% 98%)
+    );
+    --shadow-elegant: 0 10px 40px -10px hsl(150 52% 37% / 0.15);
+    --shadow-card: 0 4px 20px -4px hsl(0 0% 0% / 0.08);
+    --shadow-glow: 0 0 60px hsl(150 52% 37% / 0.2);
+
+    --sidebar-background: 150 33% 94%;
+    --sidebar-foreground: 0 0% 18%;
+    --sidebar-primary: 150 52% 37%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 150 33% 90%;
+    --sidebar-accent-foreground: 0 0% 18%;
+    --sidebar-border: 140 12% 89%;
+    --sidebar-ring: 150 52% 37%;
+  }
+
+  .dark {
+    /* Dark mode with better contrast for readability */
+    --background: 150 8% 12%; /* Slightly lighter dark background */
+    --foreground: 150 10% 98%; /* Brighter text for better readability */
+
+    --card: 150 10% 16%; /* Lighter cards */
+    --card-foreground: 150 8% 96%; /* Bright text on cards */
+
+    --popover: 150 10% 14%;
+    --popover-foreground: 150 8% 96%;
+
+    --primary: 150 52% 55%; /* Brighter primary for dark mode */
+    --primary-foreground: 150 10% 10%; /* Dark text on bright primary */
+
+    --secondary: 150 40% 30%; /* Lighter secondary */
+    --secondary-foreground: 150 8% 96%;
+
+    --muted: 150 10% 20%; /* Lighter muted areas */
+    --muted-foreground: 150 8% 70%; /* Brighter muted text */
+
+    --accent: 150 52% 55%;
+    --accent-foreground: 150 10% 10%;
+
+    --destructive: 0 70% 50%; /* Brighter red for visibility */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 150 8% 25%; /* Lighter borders */
+    --input: 150 8% 22%; /* Lighter inputs */
+    --ring: 150 52% 55%;
+
+    --sidebar-background: 150 10% 14%;
+    --sidebar-foreground: 150 8% 96%;
+    --sidebar-primary: 150 52% 55%;
+    --sidebar-primary-foreground: 150 10% 10%;
+    --sidebar-accent: 150 10% 20%;
+    --sidebar-accent-foreground: 150 8% 96%;
+    --sidebar-border: 150 8% 25%;
+    --sidebar-ring: 150 52% 55%;
+  }
+
+  .dark.theme-auth {
+    --background: 150 50% 8%;
+    --foreground: 150 60% 95%;
+
+    --card: 150 45% 12%;
+    --card-foreground: 150 60% 95%;
+
+    --popover: 150 45% 10%;
+    --popover-foreground: 150 60% 95%;
+
+    --primary: 155 70% 45%;
+    --primary-foreground: 150 50% 8%;
+
+    --secondary: 150 30% 18%;
+    --secondary-foreground: 150 60% 90%;
+
+    --muted: 150 25% 15%;
+    --muted-foreground: 150 20% 60%;
+
+    --accent: 155 70% 50%;
+    --accent-foreground: 150 50% 8%;
+
+    --border: 150 30% 20%;
+    --input: 150 30% 18%;
+    --ring: 155 70% 45%;
+
+    --sidebar-background: 150 45% 10%;
+    --sidebar-foreground: 150 60% 90%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "DM Sans", sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: "Playfair Display", serif;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: "Playfair Display", serif;
+  }
+
+  .font-body {
+    font-family: "DM Sans", sans-serif;
+  }
+
+  .gradient-primary {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--primary)),
+      hsl(var(--secondary))
+    );
+  }
+
+  .gradient-text {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--primary)),
+      hsl(var(--secondary))
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .shadow-elegant {
+    box-shadow: 0 10px 40px -10px hsl(var(--primary) / 0.15);
+  }
+
+  .shadow-glow {
+    box-shadow: 0 0 60px hsl(var(--primary) / 0.2);
+  }
+
+  /* Beautiful shine animation for progress bar */
+  @keyframes shine {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+/* React DatePicker Custom Styling */
+.react-datepicker-wrapper {
+  width: 100%;
+}
+
+.react-datepicker__input-container {
+  width: 100%;
+}
+
+.react-datepicker {
+  font-family: "DM Sans", sans-serif;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+.react-datepicker__header {
+  background-color: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border));
+  border-radius: 0.5rem 0.5rem 0 0;
+}
+
+.react-datepicker__current-month,
+.react-datepicker-time__header,
+.react-datepicker-year-header {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+.react-datepicker__day-name,
+.react-datepicker__day,
+.react-datepicker__time-name {
+  color: hsl(var(--foreground));
+}
+
+.react-datepicker__day:hover {
+  background-color: hsl(var(--accent));
+}
+
+.react-datepicker__day--selected,
+.react-datepicker__day--keyboard-selected {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.react-datepicker__day--selected:hover {
+  background-color: hsl(var(--primary));
+}
+
+.react-datepicker__today-button {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-top: 1px solid hsl(var(--border));
+  padding: 0.5rem;
+  font-weight: 500;
+}
+
+.react-datepicker__today-button:hover {
+  background-color: hsl(var(--primary));
+  opacity: 0.9;
+}
