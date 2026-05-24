@@ -9,18 +9,24 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { 
-  ShoppingCart, 
-  CreditCard, 
-  Archive, 
-  RotateCcw, 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  ShoppingCart,
+  CreditCard,
+  Archive,
+  RotateCcw,
   Ban,
-  Printer,
   User,
-  Percent,
   X,
-  Plus,
-  Minus,
   Search
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -33,9 +39,18 @@ export default function POSTerminal() {
   const { user } = useAuth();
   const cart = usePosCart();
   const scanner = usePosScanner({
-    onProductScanned: (product) => {
-      cart.addItem(product);
-      toast.success(`Added: ${product.name}`);
+    onProductScanned: (product, unitType) => {
+      const stockAvailable = product.stock_quantity ?? 0;
+      const conversionFactor = unitType?.conversion_factor ?? 1;
+      const maxUnits = Math.floor(stockAvailable / conversionFactor);
+
+      if (maxUnits <= 0) {
+        toast.error(`${product.name} is out of stock${conversionFactor > 1 ? ` (need ${conversionFactor} pcs per ${unitType?.name ?? 'unit'})` : ''}`);
+        return;
+      }
+      cart.addItem(product, unitType);
+      const label = unitType ? `${product.name} (${unitType.name})` : product.name;
+      toast.success(`Added: ${label}`);
     },
     onError: (message) => {
       toast.error(message);
@@ -48,16 +63,12 @@ export default function POSTerminal() {
   const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false);
   const [holdRecallOpen, setHoldRecallOpen] = useState(false);
   const [voidModalOpen, setVoidModalOpen] = useState(false);
-  const [discountModalOpen, setDiscountModalOpen] = useState(false);
+  const [newSaleDialogOpen, setNewSaleDialogOpen] = useState(false);
 
   // Customer state
   const [showCustomerInput, setShowCustomerInput] = useState(false);
   const [customerName, setCustomerName] = useState('');
 
-  // Discount state
-  const [discountType, setDiscountType] = useState<'percentage' | 'amount'>('percentage');
-  const [discountValue, setDiscountValue] = useState('');
-  
   // Dropdown ref for click-outside detection
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -100,56 +111,39 @@ export default function POSTerminal() {
 
   const handleNewSale = () => {
     if (cart.items.length > 0) {
-      if (confirm('Clear current cart and start new sale?')) {
-        cart.clearCart();
-        payment.clearPayments();
-        setCustomerName('');
-        scanner.focusScanner();
-        toast.success('New sale started');
-      }
+      setNewSaleDialogOpen(true);
+    } else {
+      scanner.focusScanner();
     }
   };
 
-  const handleApplyDiscount = () => {
-    const value = parseFloat(discountValue);
-    if (isNaN(value) || value < 0) {
-      toast.error('Invalid discount value');
+  const confirmNewSale = () => {
+    cart.clearCart();
+    payment.clearPayments();
+    setCustomerName('');
+    setNewSaleDialogOpen(false);
+    scanner.focusScanner();
+    toast.success('New sale started');
+  };
+
+  // Handle product selection from search dropdown
+  const handleProductSelect = (product: any) => {
+    if ((product.stock_quantity ?? 0) <= 0) {
+      toast.error(`${product.name} is out of stock`);
       return;
     }
 
-    if (discountType === 'percentage') {
-      if (value > 100) {
-        toast.error('Discount percentage cannot exceed 100%');
-        return;
-      }
-      cart.applyGlobalDiscount(value, 0);
-      toast.success(`${value}% discount applied`);
-    } else {
-      if (value > cart.subtotal) {
-        toast.error('Discount amount cannot exceed subtotal');
-        return;
-      }
-      cart.applyGlobalDiscount(0, value);
-      toast.success(`₦${value.toLocaleString()} discount applied`);
-    }
-
-    setDiscountModalOpen(false);
-    setDiscountValue('');
-  };
-  
-  // Handle product selection from search dropdown
-  const handleProductSelect = (product: any) => {
     cart.addItem(product);
     toast.success(`Added: ${product.name}`);
-    
+
     // Clear search input
     if (scanner.scannerRef.current) {
       scanner.scannerRef.current.value = '';
     }
-    
+
     // Clear search state (closes dropdown)
     scanner.clearSearch();
-    
+
     // Refocus scanner
     scanner.focusScanner();
   };
@@ -213,7 +207,7 @@ export default function POSTerminal() {
       <div className="bg-card border-b px-6 py-3 shadow-sm">
         <div className="flex items-center gap-4">
           <div className="flex-1 relative" ref={dropdownRef}>
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground dark:text-muted-foreground/80" />
             <Input
               ref={scanner.scannerRef}
               type="text"
@@ -224,24 +218,50 @@ export default function POSTerminal() {
             {/* Search Results Dropdown */}
             {scanner.searchResults.length > 0 && scanner.searchQuery && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-card border-2 border-green-200 dark:border-green-800 rounded-lg shadow-lg max-h-96 overflow-y-auto z-50">
-                {scanner.searchResults.map((product) => (
-                  <button
-                    key={product.id}
-                    onClick={() => handleProductSelect(product)}
-                    className="w-full px-4 py-3 hover:bg-green-50 dark:hover:bg-green-950/30 border-b last:border-b-0 text-left flex items-center justify-between"
-                  >
-                    <div className="flex-1">
-                      <p className="font-medium">{product.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {product.barcode && `Barcode: ${product.barcode} • `}
-                        Stock: {product.stock_quantity || 0}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-green-600 dark:text-green-400">₦{product.price?.toLocaleString()}</p>
-                    </div>
-                  </button>
-                ))}
+                {scanner.searchResults.map((product) => {
+                  const stockQty = product.stock_quantity ?? 0;
+                  const reorderPoint = product.reorder_point ?? product.low_stock_threshold ?? 0;
+                  const isOutOfStock = stockQty <= 0;
+                  const isLowStock = stockQty > 0 && stockQty <= reorderPoint;
+
+                  const stockBadge = isOutOfStock
+                    ? { label: 'Out of Stock', color: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400' }
+                    : isLowStock
+                      ? { label: `Low Stock: ${stockQty}`, color: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400' }
+                      : { label: `In Stock: ${stockQty}`, color: 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400' };
+
+                  return (
+                    <button
+                      key={product.id}
+                      onClick={() => handleProductSelect(product)}
+                      disabled={isOutOfStock}
+                      className={`w-full px-4 py-3 border-b last:border-b-0 text-left flex items-center justify-between ${
+                        isOutOfStock
+                          ? 'opacity-60 cursor-not-allowed bg-gray-50 dark:bg-gray-900/30'
+                          : 'hover:bg-green-50 dark:hover:bg-green-950/30'
+                      }`}
+                    >
+                      <div className="flex-1">
+                        <p className={`font-medium ${isOutOfStock ? 'line-through text-muted-foreground dark:text-muted-foreground/80' : ''}`}>
+                          {product.name}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {product.sku && (
+                            <span className="text-xs text-muted-foreground dark:text-muted-foreground/80">SKU: {product.sku}</span>
+                          )}
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${stockBadge.color}`}>
+                            {stockBadge.label}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`font-bold ${isOutOfStock ? 'text-muted-foreground dark:text-muted-foreground/80' : 'text-green-600 dark:text-green-400'}`}>
+                          ₦{product.price?.toLocaleString()}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -291,8 +311,8 @@ export default function POSTerminal() {
           <div className="flex-1 overflow-y-auto">
             {cart.items.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-center text-muted-foreground">
-                  <ShoppingCart className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                <div className="text-center text-muted-foreground dark:text-muted-foreground/80">
+                  <ShoppingCart className="h-12 w-12 mx-auto mb-3 opacity-20 dark:opacity-40" />
                   <p className="text-sm font-medium">Cart is empty</p>
                   <p className="text-xs">Scan a product to get started</p>
                 </div>
@@ -300,7 +320,7 @@ export default function POSTerminal() {
             ) : (
               <table className="w-full">
                 <thead className="bg-muted sticky top-0 z-10">
-                  <tr className="text-left text-xs text-muted-foreground">
+                  <tr className="text-left text-xs text-muted-foreground dark:text-muted-foreground/80">
                     <th className="px-3 py-2 font-medium">Product</th>
                     <th className="px-2 py-2 font-medium w-28">Qty</th>
                     <th className="px-2 py-2 font-medium w-24 text-right">Price</th>
@@ -309,18 +329,21 @@ export default function POSTerminal() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {cart.items.map((item) => (
-                    <POSCartItem
-                      key={item.product_id}
-                      item={item}
-                      isLastScanned={item.product_id === cart.lastScannedProductId}
-                      onIncrement={() => cart.incrementQty(item.product_id)}
-                      onDecrement={() => cart.decrementQty(item.product_id)}
-                      onRemove={() => cart.removeItem(item.product_id)}
-                      onUpdateQuantity={(qty) => cart.updateQuantity(item.product_id, qty)}
-                      onUpdatePrice={(price) => cart.updatePrice(item.product_id, price)}
-                    />
-                  ))}
+                  {cart.items.map((item) => {
+                    const cartKey = `${item.product_id}_${item.unit_type_id ?? 'base'}`;
+                    return (
+                      <POSCartItem
+                        key={cartKey}
+                        item={item}
+                        isLastScanned={item.product_id === cart.lastScannedProductId}
+                        onIncrement={() => cart.incrementQty(cartKey)}
+                        onDecrement={() => cart.decrementQty(cartKey)}
+                        onRemove={() => cart.removeItem(cartKey)}
+                        onUpdateQuantity={(qty) => cart.updateQuantity(cartKey, qty)}
+                        onUpdatePrice={(price) => cart.updatePrice(cartKey, price, user?.role)}
+                      />
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -330,7 +353,7 @@ export default function POSTerminal() {
           <div className="border-t bg-background px-4 py-3 shrink-0">
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal:</span>
+                <span className="text-muted-foreground dark:text-muted-foreground/80">Subtotal:</span>
                 <span className="font-semibold">₦{cart.subtotal.toLocaleString()}</span>
               </div>
               {cart.globalDiscountAmount > 0 && (
@@ -344,7 +367,7 @@ export default function POSTerminal() {
                 <span>TOTAL:</span>
                 <span>₦{cart.grandTotal.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between text-xs text-muted-foreground">
+              <div className="flex justify-between text-xs text-muted-foreground dark:text-muted-foreground/80">
                 <span>Profit:</span>
                 <span className="text-green-600 dark:text-green-400 font-semibold">
                   ₦{cart.totalProfit.toLocaleString()} ({cart.profitMargin.toFixed(1)}%)
@@ -401,8 +424,8 @@ export default function POSTerminal() {
               </div>
             </div>
 
-            {/* Customer + Discount - compact side by side */}
-            <div className="px-3 pb-3 grid grid-cols-2 gap-2">
+            {/* Customer */}
+            <div className="px-3 pb-3">
               <Card className="p-3">
                 <p className="text-xs font-medium mb-2">Customer</p>
                 {!showCustomerInput ? (
@@ -434,67 +457,6 @@ export default function POSTerminal() {
                     >
                       <X className="h-3 w-3" />
                     </Button>
-                  </div>
-                )}
-              </Card>
-              <Card className="p-3">
-                <p className="text-xs font-medium mb-2">Discount</p>
-                {!discountModalOpen ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setDiscountModalOpen(true)}
-                    className="w-full h-8 text-xs"
-                    disabled={cart.items.length === 0}
-                  >
-                    <Percent className="h-3 w-3 mr-1" />
-                    Apply
-                  </Button>
-                ) : (
-                  <div className="space-y-1.5">
-                    <div className="flex gap-1">
-                      <Button
-                        variant={discountType === 'percentage' ? 'default' : 'outline'}
-                        size="sm"
-                        className="h-7 text-xs px-2"
-                        onClick={() => setDiscountType('percentage')}
-                      >
-                        %
-                      </Button>
-                      <Button
-                        variant={discountType === 'amount' ? 'default' : 'outline'}
-                        size="sm"
-                        className="h-7 text-xs px-2"
-                        onClick={() => setDiscountType('amount')}
-                      >
-                        ₦
-                      </Button>
-                    </div>
-                    <div className="flex gap-1">
-                      <Input
-                        type="number"
-                        value={discountValue}
-                        onChange={(e) => setDiscountValue(e.target.value)}
-                        placeholder={discountType === 'percentage' ? '%' : '₦'}
-                        className="flex-1 h-7 text-xs"
-                        min="0"
-                        max={discountType === 'percentage' ? '100' : cart.subtotal.toString()}
-                      />
-                      <Button onClick={handleApplyDiscount} size="sm" className="h-7 text-xs px-2">
-                        OK
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => {
-                          setDiscountModalOpen(false);
-                          setDiscountValue('');
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
                   </div>
                 )}
               </Card>
@@ -543,6 +505,26 @@ export default function POSTerminal() {
           scanner.focusScanner();
         }}
       />
+
+      <AlertDialog open={newSaleDialogOpen} onOpenChange={setNewSaleDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start New Sale?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will clear the current cart and remove all items. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmNewSale}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              Clear Cart & Start New Sale
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -36,11 +36,19 @@ export interface CreatePurchaseOrderData {
   supplier_id: number;
   order_date: string;
   expected_delivery_date?: string;
+  payment_method?: string;
+  payment_due_date?: string;
   notes?: string;
   items: Array<{
     product_id: number;
-    quantity: number;
+    quantity_ordered: number;
     unit_cost: number;
+    unit_type?: string;
+    product_unit_type_id?: number | null;
+    conversion_factor?: number;
+    batch_number?: string;
+    expiry_date?: string;
+    manufacturing_date?: string;
   }>;
 }
 
@@ -51,21 +59,29 @@ export interface UpdatePurchaseOrderData {
   notes?: string;
   items?: Array<{
     product_id: number;
-    quantity: number;
+    quantity_ordered: number;
     unit_cost: number;
+    unit_type?: string;
+    product_unit_type_id?: number | null;
+    conversion_factor?: number;
+    batch_number?: string;
+    expiry_date?: string;
+    manufacturing_date?: string;
   }>;
 }
 
 export const purchaseOrderApi = {
-  // Get all purchase orders
-  getAll: async (params?: { status?: string; supplier_id?: number }) => {
+  // Get all purchase orders (paginated)
+  getAll: async (params?: { status?: string; supplier_id?: number; page?: number; per_page?: number }) => {
     const queryParams = new URLSearchParams();
     if (params?.status) queryParams.append('status', params.status);
     if (params?.supplier_id) queryParams.append('supplier_id', params.supplier_id.toString());
-    
+    if (params?.page) queryParams.append('page', String(params.page));
+    if (params?.per_page) queryParams.append('per_page', String(params.per_page));
+
     const query = queryParams.toString();
     const response = await api.get(`/purchase-orders${query ? '?' + query : ''}`);
-    return response.data.data || response.data;
+    return response.data as import('./sales').PaginatedResponse<PurchaseOrder>;
   },
 
   // Get single purchase order
@@ -129,6 +145,12 @@ export const purchaseOrderApi = {
     const response = await api.get('/purchase-orders-export', {
       responseType: 'blob',
     });
+    return response.data;
+  },
+
+  // Generate short-lived PDF token for download
+  generatePdfToken: async (id: number) => {
+    const response = await api.post(`/purchase-orders/${id}/pdf-token`);
     return response.data;
   },
 };

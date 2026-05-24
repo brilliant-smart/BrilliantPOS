@@ -56,7 +56,12 @@ export const backupApi = {
   },
 
   // Restore backup with password
-  restoreBackup: async (filename: string, password: string) => {
+  restoreBackup: async (filename: string, password: string): Promise<{
+    message: string;
+    statements_executed?: number;
+    statements_failed?: number;
+    errors?: string[];
+  }> => {
     const response = await api.post(`/backups/${filename}/restore`, { password });
     return response.data;
   },

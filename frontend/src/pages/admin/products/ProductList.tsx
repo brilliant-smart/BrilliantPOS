@@ -40,7 +40,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Pencil, Trash2, Plus, Loader2, Search, Star, ArrowUpDown, CheckSquare, Square, Download, Package, History, Scan, Calendar, AlertTriangle, X } from "lucide-react";
+import { Pencil, Trash2, Plus, Loader2, Search, Star, ArrowUpDown, CheckSquare, Square, Download, Package, History, Scan, Calendar, AlertTriangle, X, Layers } from "lucide-react";
 import BarcodeScanner from "@/components/BarcodeScanner";
 import { createProduct, updateProduct } from "@/app/api/products";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -49,7 +49,30 @@ import { StockAdjustmentModal } from "@/components/StockAdjustmentModal";
 import { StockHistoryModal } from "@/components/StockHistoryModal";
 import { MonthYearPicker } from '@/components/MonthYearPicker';
 import { Switch } from "@/components/ui/switch";
-import { Product } from "@/types/ims";
+import { Product, ProductUnitType } from "@/types/ims";
+import { DataPagination } from '@/components/DataPagination';
+
+const UNIT_TYPE_PRESETS = [
+  { name: 'Carton', short_name: 'ctn', conversion_factor: 12 },
+  { name: 'Pack', short_name: 'pk', conversion_factor: 6 },
+  { name: 'Box', short_name: 'box', conversion_factor: 24 },
+  { name: 'Dozen', short_name: 'dz', conversion_factor: 12 },
+  { name: 'Bag', short_name: 'bag', conversion_factor: 10 },
+  { name: 'Crate', short_name: 'crt', conversion_factor: 24 },
+  { name: 'Bundle', short_name: 'bdl', conversion_factor: 20 },
+  { name: 'Sack', short_name: 'sck', conversion_factor: 50 },
+];
+
+interface UnitTypeFormData {
+  id?: number;
+  name: string;
+  short_name: string;
+  conversion_factor: number;
+  selling_price: number;
+  is_base: boolean;
+  sort_order: number;
+  barcodes: string[];
+}
 
 export default function ProductList() {
   const { user } = useAuth();
@@ -70,6 +93,8 @@ export default function ProductList() {
 
   // Bulk operations state
   const [selectedProducts, setSelectedProducts] = useState<number[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PRODUCT_PER_PAGE = 20;
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
   // Stock management state
@@ -94,8 +119,11 @@ export default function ProductList() {
     batch_number: "",
     expiry_date: "",
     manufacturing_date: "",
+    has_unit_types: false,
+    unit_types: [] as UnitTypeFormData[],
   });
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [unitTypeScannerIndex, setUnitTypeScannerIndex] = useState<number | null>(null);
 
   useEffect(() => {
     loadData();
@@ -160,6 +188,18 @@ export default function ProductList() {
 
     return sorted;
   }, [products, searchQuery, featuredFilter, sortBy]);
+
+  // Client-side pagination
+  const productTotalPages = Math.max(1, Math.ceil(filteredProducts.length / PRODUCT_PER_PAGE));
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * PRODUCT_PER_PAGE;
+    return filteredProducts.slice(start, start + PRODUCT_PER_PAGE);
+  }, [filteredProducts, currentPage]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, featuredFilter, sortBy]);
 
   // Keyboard shortcuts - placed after filteredProducts is defined
   useEffect(() => {
@@ -250,6 +290,8 @@ export default function ProductList() {
       batch_number: "",
       expiry_date: "",
       manufacturing_date: "",
+      has_unit_types: false,
+      unit_types: [] as UnitTypeFormData[],
     });
     setImageFile(null);
     setFormDialogOpen(true);
@@ -257,11 +299,35 @@ export default function ProductList() {
 
   const openEditDialog = (product: Product) => {
     setEditingProduct(product);
+    const nonBaseUnitTypes = (product.unit_types || [])
+      .filter((ut: ProductUnitType) => !ut.is_base)
+      .map((ut: ProductUnitType) => ({
+        id: ut.id,
+        name: ut.name,
+        short_name: ut.short_name,
+        conversion_factor: ut.conversion_factor,
+        selling_price: ut.selling_price,
+        is_base: ut.is_base,
+        sort_order: ut.sort_order,
+        barcodes: (ut.barcodes || []).map((b: any) => b.barcode),
+      }));
+    // Find base unit type to get its barcodes
+    const baseUnitType = (product.unit_types || []).find((ut: ProductUnitType) => ut.is_base);
+
+    // Find base unit type ID — barcodes linked to it should appear in legacy field
+    const baseUnitTypeId = baseUnitType?.id;
+
     setFormData({
       name: product.name,
       slug: product.slug,
       sku: product.sku || "",
-      barcodes: (product.barcodes || []).map((b: any) => b.barcode),
+      barcodes: (product.barcodes || [])
+        .filter((b: any) => {
+          // Show barcodes that are either unlinked or linked to the base unit type
+          if (!b.product_unit_type_id) return true;
+          return b.product_unit_type_id === baseUnitTypeId;
+        })
+        .map((b: any) => b.barcode),
       description: product.description || "",
       price: String(product.price),
       is_active: product.is_active,
@@ -270,6 +336,8 @@ export default function ProductList() {
       batch_number: product.batch_number || "",
       expiry_date: product.expiry_date || "",
       manufacturing_date: product.manufacturing_date || "",
+      has_unit_types: nonBaseUnitTypes.length > 0,
+      unit_types: nonBaseUnitTypes,
     });
     setImageFile(null);
     setFormDialogOpen(true);
@@ -306,6 +374,25 @@ export default function ProductList() {
       return;
     }
 
+    // Validate unit types
+    if (formData.has_unit_types) {
+      for (let i = 0; i < formData.unit_types.length; i++) {
+        const ut = formData.unit_types[i];
+        if (!ut.name.trim()) {
+          toast({ title: "Validation Error", description: `Unit type ${i + 1}: Name is required`, variant: "destructive" });
+          return;
+        }
+        if (ut.conversion_factor < 1) {
+          toast({ title: "Validation Error", description: `Unit type ${i + 1}: Conversion factor must be at least 1`, variant: "destructive" });
+          return;
+        }
+        if (ut.selling_price < 0) {
+          toast({ title: "Validation Error", description: `Unit type ${i + 1}: Selling price must be 0 or greater`, variant: "destructive" });
+          return;
+        }
+      }
+    }
+
     setSubmitting(true);
 
     try {
@@ -327,15 +414,47 @@ export default function ProductList() {
       formDataToSend.append("track_batch", formData.track_batch ? "1" : "0");
       formDataToSend.append("track_expiry", formData.track_expiry ? "1" : "0");
 
-      // Only include batch/expiry data if editing and values are provided
-      if (editingProduct) {
-        if (formData.batch_number) formDataToSend.append("batch_number", formData.batch_number.trim());
-        if (formData.expiry_date) formDataToSend.append("expiry_date", formData.expiry_date);
-        if (formData.manufacturing_date) formDataToSend.append("manufacturing_date", formData.manufacturing_date);
-      }
+      // Include batch/expiry data if values are provided
+      if (formData.batch_number) formDataToSend.append("batch_number", formData.batch_number.trim());
+      if (formData.expiry_date) formDataToSend.append("expiry_date", formData.expiry_date);
+      if (formData.manufacturing_date) formDataToSend.append("manufacturing_date", formData.manufacturing_date);
 
       if (imageFile) {
         formDataToSend.append("image", imageFile);
+      }
+
+      // Send unit types data (only non-base types, base is auto-created by backend)
+      // Send unit types data (only non-base types, base is auto-created by backend)
+      if (formData.has_unit_types) {
+        const nonBaseUnitTypes = formData.unit_types.filter(ut => !ut.is_base);
+        formDataToSend.append("_has_unit_types", "1");
+        // Send an empty entry so Laravel parses it as an array even when empty
+        if (nonBaseUnitTypes.length === 0) {
+          formDataToSend.append("unit_types_clear", "1");
+        }
+        nonBaseUnitTypes.forEach((ut: UnitTypeFormData, index: number) => {
+          if (ut.id) {
+            formDataToSend.append(`unit_types[${index}][id]`, String(ut.id));
+          }
+          formDataToSend.append(`unit_types[${index}][name]`, ut.name);
+          formDataToSend.append(`unit_types[${index}][short_name]`, ut.short_name);
+          formDataToSend.append(`unit_types[${index}][conversion_factor]`, String(ut.conversion_factor));
+          formDataToSend.append(`unit_types[${index}][selling_price]`, String(ut.selling_price));
+          formDataToSend.append(`unit_types[${index}][is_base]`, "0");
+          formDataToSend.append(`unit_types[${index}][sort_order]`, String(index + 1));
+          // Send barcodes for this unit type
+          if (ut.barcodes && ut.barcodes.length > 0) {
+            ut.barcodes.forEach((barcode: string) => {
+              if (barcode.trim()) {
+                formDataToSend.append(`unit_types[${index}][barcodes][]`, barcode.trim());
+              }
+            });
+          }
+        });
+      } else if (editingProduct) {
+        // If user turned off unit types, signal to delete all non-base unit types
+        formDataToSend.append("_has_unit_types", "1");
+        formDataToSend.append("unit_types_clear", "1");
       }
 
       if (editingProduct) {
@@ -554,7 +673,7 @@ export default function ProductList() {
     const sortedProducts = [...productsToExport].sort((a, b) => a.id - b.id);
 
     // Enhanced CSV headers
-    const headers = ["S/N", "Product ID", "Name", "Price (NGN)", "Stock Quantity", "Stock Status", "Status", "Featured", "Slug"];
+    const headers = ["S/N", "Product ID", "Name", "Price (NGN)", "Stock Quantity", "Stock Status", "Status", "Slug"];
 
     // Map products with serial numbers
     const rows = sortedProducts.map((p, index) => [
@@ -565,7 +684,6 @@ export default function ProductList() {
       p.stock_quantity,
       p.stock_status.replace('_', ' ').toUpperCase(),
       p.is_active ? "Active" : "Inactive",
-      p.is_featured ? "Yes" : "No",
       p.slug,
     ]);
 
@@ -604,11 +722,11 @@ export default function ProductList() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Products</h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground dark:text-muted-foreground/80 mt-1">
             Manage your product inventory
           </p>
         </div>
@@ -706,7 +824,7 @@ export default function ProductList() {
       <div className="flex flex-col sm:flex-row gap-4">
         {/* Search */}
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
           <Input
             placeholder="Search products by name..."
             value={searchQuery}
@@ -761,7 +879,7 @@ export default function ProductList() {
             <TableRow>
               <TableHead className="w-12">
                 <Checkbox
-                  checked={selectedProducts.length === filteredProducts.length && filteredProducts.length > 0}
+                  checked={paginatedProducts.length > 0 && paginatedProducts.every(p => selectedProducts.includes(p.id))}
                   onCheckedChange={toggleSelectAll}
                   aria-label="Select all"
                   className={
@@ -792,14 +910,14 @@ export default function ProductList() {
               </TableRow>
             ) : filteredProducts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground dark:text-muted-foreground/80">
                   {searchQuery
                     ? "No products match your search criteria."
                     : "No products found. Click \"Add Product\" to create one."}
                 </TableCell>
               </TableRow>
             ) : (
-              filteredProducts.map((product) => (
+              paginatedProducts.map((product) => (
                 <TableRow key={product.id}>
                   <TableCell>
                     <Checkbox
@@ -816,7 +934,7 @@ export default function ProductList() {
                         className="h-12 w-12 object-cover rounded"
                       />
                     ) : (
-                      <div className="h-12 w-12 bg-muted rounded flex items-center justify-center text-muted-foreground text-xs">
+                      <div className="h-12 w-12 bg-muted rounded flex items-center justify-center text-muted-foreground dark:text-muted-foreground/80 text-xs">
                         No image
                       </div>
                     )}
@@ -848,7 +966,7 @@ export default function ProductList() {
                         className={`h-4 w-4 ${
                           product.is_featured
                             ? "fill-yellow-400 text-yellow-400 dark:fill-yellow-500 dark:text-yellow-500"
-                            : "text-muted-foreground"
+                            : "text-muted-foreground dark:text-muted-foreground/80"
                         }`}
                       />
                     </Button>
@@ -902,6 +1020,14 @@ export default function ProductList() {
           </TableBody>
         </Table>
       </div>
+
+      <DataPagination
+        currentPage={currentPage}
+        totalPages={productTotalPages}
+        totalRecords={filteredProducts.length}
+        perPage={PRODUCT_PER_PAGE}
+        onPageChange={setCurrentPage}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -1047,10 +1173,331 @@ export default function ProductList() {
                 id="price"
                 type="number"
                 value={formData.price}
-                onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                onChange={(e) => {
+                  const newPrice = e.target.value;
+                  setFormData(prev => {
+                    const updated = { ...prev, price: newPrice };
+                    // Auto-update base unit type selling price and suggest for other unit types
+                    if (prev.has_unit_types && prev.unit_types.length > 0) {
+                      updated.unit_types = prev.unit_types.map(ut => {
+                        if (ut.is_base) {
+                          return { ...ut, selling_price: parseFloat(newPrice) || 0 };
+                        }
+                        return ut;
+                      });
+                    }
+                    return updated;
+                  });
+                }}
                 required
                 placeholder="8500"
               />
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
+                This is the base (piece) selling price
+              </p>
+            </div>
+
+            {/* Unit Types Section */}
+            <div className="border rounded-lg p-4 bg-green-50/50 dark:bg-green-950/20 space-y-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Layers className="h-5 w-5 text-green-600 dark:text-green-400" />
+                <h3 className="font-semibold text-sm">Selling Units (Carton, Pack, Box, etc.)</h3>
+              </div>
+
+              <div className="flex items-center justify-between p-3 border rounded-lg bg-card">
+                <div className="flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
+                  <div>
+                    <Label htmlFor="has_unit_types" className="cursor-pointer font-medium">
+                      This product has multiple selling units
+                    </Label>
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
+                      Enable for products sold in cartons, packs, boxes, etc.
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  id="has_unit_types"
+                  checked={formData.has_unit_types}
+                  onCheckedChange={(checked) => {
+                    setFormData(prev => {
+                      if (checked) {
+                        // Add base unit type (Piece) automatically
+                        const basePrice = parseFloat(prev.price) || 0;
+                        return {
+                          ...prev,
+                          has_unit_types: true,
+                          unit_types: prev.unit_types.length === 0
+                            ? [{
+                                name: 'Piece',
+                                short_name: 'pc',
+                                conversion_factor: 1,
+                                selling_price: basePrice,
+                                is_base: true,
+                                sort_order: 0,
+                                barcodes: [],
+                              }]
+                            : prev.unit_types,
+                        };
+                      }
+                      return { ...prev, has_unit_types: false, unit_types: [] };
+                    });
+                  }}
+                />
+              </div>
+
+              {formData.has_unit_types && (
+                <div className="space-y-3">
+                  {/* Base unit type display */}
+                  {formData.unit_types.filter(ut => ut.is_base).length > 0 && (
+                    <div className="bg-muted/50 rounded-md p-3 text-sm">
+                      <span className="font-medium">Base unit:</span>{' '}
+                      Piece = 1 pc = ₦{(parseFloat(formData.price) || 0).toLocaleString()}
+                    </div>
+                  )}
+
+                  {/* Non-base unit types */}
+                  {formData.unit_types.filter(ut => !ut.is_base).map((ut, idx) => {
+                    const realIdx = formData.unit_types.indexOf(ut);
+                    const preset = UNIT_TYPE_PRESETS.find(p => p.name === ut.name);
+                    return (
+                      <div key={realIdx} className="border rounded-lg p-3 space-y-3 bg-card">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-muted-foreground dark:text-muted-foreground/80">Unit Type {idx + 1}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                unit_types: prev.unit_types.filter((_, i) => i !== realIdx),
+                              }));
+                            }}
+                            className="h-7 text-red-500 dark:text-red-400 hover:text-red-600"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            Remove
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Unit Name *</Label>
+                            <Select
+                              value={ut.name}
+                              onValueChange={(value) => {
+                                const preset = UNIT_TYPE_PRESETS.find(p => p.name === value);
+                                const basePrice = parseFloat(formData.price) || 0;
+                                setFormData(prev => ({
+                                  ...prev,
+                                  unit_types: prev.unit_types.map((item, i) =>
+                                    i === realIdx
+                                      ? {
+                                          ...item,
+                                          name: value,
+                                          short_name: preset?.short_name || value.substring(0, 3).toLowerCase(),
+                                          conversion_factor: preset?.conversion_factor || item.conversion_factor,
+                                          selling_price: preset && basePrice > 0 ? Math.round(basePrice * (preset.conversion_factor || item.conversion_factor)) : item.selling_price,
+                                        }
+                                      : item
+                                  ),
+                                }));
+                              }}
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="Select unit" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {UNIT_TYPE_PRESETS.map(p => (
+                                  <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label className="text-xs">Short Name</Label>
+                            <Input
+                              value={ut.short_name}
+                              onChange={(e) => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  unit_types: prev.unit_types.map((item, i) =>
+                                    i === realIdx ? { ...item, short_name: e.target.value } : item
+                                  ),
+                                }));
+                              }}
+                              placeholder="ctn"
+                              className="h-9"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Conversion Factor *</Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={ut.conversion_factor || ''}
+                              onChange={(e) => {
+                                const factor = parseFloat(e.target.value) || 1;
+                                const basePrice = parseFloat(formData.price) || 0;
+                                setFormData(prev => ({
+                                  ...prev,
+                                  unit_types: prev.unit_types.map((item, i) =>
+                                    i === realIdx
+                                      ? {
+                                          ...item,
+                                          conversion_factor: factor,
+                                          selling_price: basePrice > 0 ? Math.round(basePrice * factor) : item.selling_price,
+                                        }
+                                      : item
+                                  ),
+                                }));
+                              }}
+                              className="h-9"
+                            />
+                            <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
+                              1 {ut.name} = {ut.conversion_factor} pieces
+                            </p>
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label className="text-xs">Selling Price (NGN) *</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              value={ut.selling_price || ''}
+                              onChange={(e) => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  unit_types: prev.unit_types.map((item, i) =>
+                                    i === realIdx ? { ...item, selling_price: parseFloat(e.target.value) || 0 } : item
+                                  ),
+                                }));
+                              }}
+                              className="h-9"
+                            />
+                            <p className="text-xs text-green-600 dark:text-green-400">
+                              ₦{ut.selling_price.toLocaleString()} per {ut.name} = ₦{(ut.selling_price / ut.conversion_factor).toFixed(2)}/piece
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Barcodes for this unit type */}
+                        <div className="space-y-2">
+                          <Label className="text-xs font-medium">{ut.name} Barcodes</Label>
+                          {ut.barcodes.map((barcode, bIdx) => (
+                            <div key={bIdx} className="flex gap-2">
+                              <Input
+                                value={barcode}
+                                onChange={(e) => {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    unit_types: prev.unit_types.map((item, i) =>
+                                      i === realIdx
+                                        ? { ...item, barcodes: item.barcodes.map((b, j) => j === bIdx ? e.target.value : b) }
+                                        : item
+                                    ),
+                                  }));
+                                }}
+                                placeholder="Scan or enter barcode"
+                                className="h-8 text-sm"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 shrink-0"
+                                onClick={() => {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    unit_types: prev.unit_types.map((item, i) =>
+                                      i === realIdx
+                                        ? { ...item, barcodes: item.barcodes.filter((_, j) => j !== bIdx) }
+                                        : item
+                                    ),
+                                  }));
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  unit_types: prev.unit_types.map((item, i) =>
+                                    i === realIdx ? { ...item, barcodes: [...item.barcodes, ''] } : item
+                                  ),
+                                }));
+                              }}
+                            >
+                              <Plus className="h-3 w-3 mr-1" />
+                              Add Barcode
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setUnitTypeScannerIndex(realIdx)}
+                            >
+                              <Scan className="h-3 w-3 mr-1" />
+                              Scan
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const basePrice = parseFloat(formData.price) || 0;
+                      setFormData(prev => ({
+                        ...prev,
+                        unit_types: [...prev.unit_types, {
+                          name: '',
+                          short_name: '',
+                          conversion_factor: 1,
+                          selling_price: basePrice,
+                          is_base: false,
+                          sort_order: prev.unit_types.length,
+                          barcodes: [],
+                        }],
+                      }));
+                    }}
+                    className="w-full"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Selling Unit
+                  </Button>
+
+                  {formData.unit_types.filter(ut => !ut.is_base).length > 0 && (
+                    <div className="text-xs text-muted-foreground dark:text-muted-foreground/80 bg-muted/50 rounded p-2">
+                      <strong>Summary:</strong>{' '}
+                      1 Piece = ₦{(parseFloat(formData.price) || 0).toLocaleString()}
+                      {formData.unit_types.filter(ut => !ut.is_base).map(ut => (
+                        <span key={ut.name}>
+                          {' | '}1 {ut.name || '?'} ({ut.conversion_factor} pcs) = ₦{ut.selling_price.toLocaleString()}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>
@@ -1074,7 +1521,7 @@ export default function ProductList() {
                 accept="image/*"
                 onChange={(e) => setImageFile(e.target.files?.[0] || null)}
               />
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 mt-1">
                 Maximum file size: 2MB
               </p>
               {editingProduct?.image_full_url && !imageFile && (
@@ -1096,12 +1543,12 @@ export default function ProductList() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex items-center justify-between p-3 border rounded-lg bg-card">
                   <div className="flex items-center gap-2">
-                    <Package className="h-4 w-4 text-muted-foreground" />
+                    <Package className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                     <div>
                       <Label htmlFor="track_batch" className="cursor-pointer font-medium">
                         Track Batches
                       </Label>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                         Enable batch number tracking
                       </p>
                     </div>
@@ -1122,7 +1569,7 @@ export default function ProductList() {
                       <Label htmlFor="track_expiry" className="cursor-pointer font-medium">
                         Track Expiry
                       </Label>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                         Enable expiry date tracking
                       </p>
                     </div>
@@ -1138,10 +1585,10 @@ export default function ProductList() {
               </div>
 
 
-              {/* Show batch/expiry fields when editing if product has existing data */}
-              {editingProduct && (formData.track_batch || formData.track_expiry || formData.batch_number || formData.expiry_date) && (
+              {/* Show batch/expiry fields when tracking is enabled */}
+              {(formData.track_batch || formData.track_expiry || formData.batch_number || formData.expiry_date) && (
                 <div className="space-y-3 pt-3 border-t">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase">Current Batch Information (if any)</p>
+                  <p className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground/80 uppercase">Batch Information</p>
 
                   <div className="grid grid-cols-3 gap-3">
                     {(formData.track_batch || formData.batch_number) && (
@@ -1268,6 +1715,36 @@ export default function ProductList() {
             }}
             onClose={() => setShowBarcodeScanner(false)}
             title="Scan barcode for product"
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Unit Type Barcode Scanner Dialog */}
+      <Dialog open={unitTypeScannerIndex !== null} onOpenChange={(open) => { if (!open) setUnitTypeScannerIndex(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Scan Unit Type Barcode</DialogTitle>
+          </DialogHeader>
+          <BarcodeScanner
+            onScan={(barcode) => {
+              if (unitTypeScannerIndex !== null) {
+                setFormData(prev => ({
+                  ...prev,
+                  unit_types: prev.unit_types.map((ut, i) =>
+                    i === unitTypeScannerIndex
+                      ? { ...ut, barcodes: [...ut.barcodes, barcode] }
+                      : ut
+                  ),
+                }));
+                setUnitTypeScannerIndex(null);
+                toast({
+                  title: "Barcode Scanned",
+                  description: `Barcode: ${barcode}`,
+                });
+              }
+            }}
+            onClose={() => setUnitTypeScannerIndex(null)}
+            title="Scan barcode for this unit type"
           />
         </DialogContent>
       </Dialog>

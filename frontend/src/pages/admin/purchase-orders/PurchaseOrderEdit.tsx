@@ -48,8 +48,8 @@ export default function PurchaseOrderEdit() {
 
   const loadSuppliers = async () => {
     try {
-      const data = await supplierApi.getAll();
-      setSuppliers(data);
+      const result = await supplierApi.getAll();
+      setSuppliers(result.data);
     } catch (error) {
       console.error('Failed to load suppliers:', error);
     }
@@ -87,7 +87,7 @@ export default function PurchaseOrderEdit() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>

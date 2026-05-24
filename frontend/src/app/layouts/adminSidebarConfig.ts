@@ -4,6 +4,9 @@ export interface SidebarItem {
   label: string;
   path: string;
   roles: Role[];
+  badge?: {
+    fetchUrl: string;
+  };
 }
 
 export const sidebarItems: SidebarItem[] = [
@@ -26,6 +29,14 @@ export const sidebarItems: SidebarItem[] = [
     label: "Sales",
     path: "/admin/sales",
     roles: ["owner", "manager", "cashier"],
+  },
+  {
+    label: "Credit",
+    path: "/admin/credit",
+    roles: ["owner", "manager"],
+    badge: {
+      fetchUrl: "/sales/overdue-count",
+    },
   },
   {
     label: "Expenses",

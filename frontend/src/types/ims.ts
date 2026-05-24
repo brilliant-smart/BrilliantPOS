@@ -3,7 +3,22 @@
 export interface ProductBarcode {
   id: number;
   product_id: number;
+  product_unit_type_id?: number | null;
   barcode: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductUnitType {
+  id: number;
+  product_id: number;
+  name: string;
+  short_name: string;
+  conversion_factor: number;
+  selling_price: number;
+  is_base: boolean;
+  sort_order: number;
+  barcodes?: ProductBarcode[];
   created_at: string;
   updated_at: string;
 }
@@ -33,6 +48,7 @@ export interface Product {
   max_stock_level?: number;
   stock_status: 'in_stock' | 'low_stock' | 'out_of_stock';
   barcodes?: ProductBarcode[];
+  unit_types?: ProductUnitType[];
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
@@ -81,9 +97,11 @@ export interface PurchaseOrderItem {
   purchase_order_id: number;
   product_id: number;
   product?: any;
+  product_unit_type_id?: number | null;
   quantity_ordered: number;
   quantity_received: number;
   unit_type: 'piece' | 'carton' | 'box' | 'pack' | 'dozen' | 'kg' | 'liter' | 'meter';
+  conversion_factor?: number;
   unit_price: string;
   unit_cost: string;
   tax_rate: string;
@@ -101,35 +119,57 @@ export interface Sale {
   customer_name: string | null;
   customer_phone: string | null;
   subtotal: string;
-  tax_amount: string;
+  vat_amount: string;
+  discount_percentage: string;
   discount_amount: string;
   total_amount: string;
-  payment_method: 'cash' | 'card' | 'transfer' | 'credit';
-  payment_status: 'paid' | 'partial' | 'unpaid';
+  sale_type: 'cash' | 'credit' | 'online' | 'pos';
+  payment_status: 'paid' | 'partially_paid' | 'unpaid';
   amount_paid: string;
-  cost_of_goods: string;
+  amount_due: string;
+  cost_of_goods_sold: string;
   gross_profit: string;
   profit_margin: string;
   notes: string | null;
   cashier_id: number;
-  cashier?: any;
+  cashier?: { id: number; name: string };
+  status?: 'completed' | 'voided';
+  voided_by?: number | null;
+  void_reason?: string | null;
+  voided_at?: string | null;
   created_at: string;
   updated_at: string;
   items?: SaleItem[];
+  payments?: Payment[];
+}
+
+export interface Payment {
+  id: number;
+  sale_id: number;
+  method: string;
+  amount: number;
+  reference: string | null;
+  notes: string | null;
+  created_at: string;
 }
 
 export interface SaleItem {
   id: number;
   sale_id: number;
   product_id: number;
+  product_unit_type_id?: number | null;
   product?: any;
+  unitType?: any;
   quantity: number;
-  unit_type: 'piece' | 'carton' | 'box' | 'pack' | 'dozen' | 'kg' | 'liter' | 'meter';
+  unit_type: string;
+  conversion_factor?: number;
   unit_price: string;
   unit_cost: string;
-  total_price: string;
+  discount_percent: string;
+  line_total: string;
+  line_cost: string;
   line_profit: string;
-  profit_margin: string;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -140,17 +180,32 @@ export interface ProfitLossReport {
     end_date: string;
   };
   revenue: {
-    total_sales: string;
-    sales_count: number;
-    average_sale: string;
+    total_sales_count: number;
+    total_revenue: number;
+    average_sale_value: number;
   };
   costs: {
-    total_cogs: string;
-    total_purchases: string;
+    cost_of_goods_sold: number;
+    total_purchases: number;
   };
   profit: {
-    gross_profit: string;
-    gross_margin: string;
+    gross_profit: number;
+    profit_margin_percent: number;
+  };
+  cash_flow: {
+    cash_in: number;
+    cash_out: number;
+    net_cash_flow: number;
+  };
+  outstanding: {
+    receivables: number;
+    payables: number;
+  };
+  inventory: {
+    current_stock_value: number;
+    total_products: number;
+    low_stock_items: number;
+    out_of_stock_items: number;
   };
 }
 
@@ -161,9 +216,9 @@ export interface StockVariance {
   expected_stock: number;
   actual_stock: number;
   variance: number;
-  variance_percentage: string;
-  variance_value: string;
-  last_count_date: string | null;
+  variance_percent: number;
+  variance_value: number;
+  severity: string;
 }
 
 export interface ExpiringProduct {
@@ -172,7 +227,8 @@ export interface ExpiringProduct {
   sku: string;
   batch_number: string | null;
   expiry_date: string;
-  days_to_expiry: number;
+  days_until_expiry: number;
   stock_quantity: number;
-  value: string;
+  stock_value: number;
+  urgency: string;
 }

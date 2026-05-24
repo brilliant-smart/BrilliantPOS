@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 class Sale extends Model
 {
@@ -23,6 +24,7 @@ class Sale extends Model
         'payment_status',
         'subtotal',
         'vat_amount',
+        'discount_percentage',
         'discount_amount',
         'total_amount',
         'amount_paid',
@@ -31,6 +33,7 @@ class Sale extends Model
         'gross_profit',
         'customer_name',
         'customer_phone',
+        'contact_name',
         'notes',
         'sale_date',
     ];
@@ -40,6 +43,7 @@ class Sale extends Model
         'voided_at' => 'datetime',
         'subtotal' => 'decimal:2',
         'vat_amount' => 'decimal:2',
+        'discount_percentage' => 'decimal:2',
         'discount_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
         'amount_paid' => 'decimal:2',
@@ -58,7 +62,7 @@ class Sale extends Model
 
     public function user()
     {
-        return $this->belongsTo(User::class, 'user_id');
+        return $this->belongsTo(User::class, 'cashier_id');
     }
 
     public function voidedBy()
@@ -109,13 +113,34 @@ class Sale extends Model
      */
     public static function generateSaleNumber(): string
     {
-        $year = date('Y');
-        $lastSale = self::whereYear('created_at', $year)
-            ->orderBy('id', 'desc')
-            ->first();
+        $attempts = 0;
+        $maxAttempts = 3;
 
-        $nextNumber = $lastSale ? (int)substr($lastSale->sale_number, -4) + 1 : 1;
+        while ($attempts < $maxAttempts) {
+            try {
+                return DB::transaction(function () {
+                    $year = date('Y');
+                    // Include soft-deleted records — the unique constraint covers them too
+                    $lastNumber = self::withTrashed()
+                        ->whereYear('created_at', $year)
+                        ->lockForUpdate()
+                        ->selectRaw("CAST(SUBSTRING(sale_number, -4) AS UNSIGNED) as num")
+                        ->orderByDesc('num')
+                        ->value('num') ?? 0;
 
-        return 'SALE-' . $year . '-' . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
+                    return 'SALE-' . $year . '-' . str_pad($lastNumber + 1, 4, '0', STR_PAD_LEFT);
+                });
+            } catch (\Illuminate\Database\QueryException $e) {
+                // Duplicate key — retry with a new number
+                if (str_contains($e->getMessage(), 'Duplicate entry') || str_contains($e->getMessage(), '1062')) {
+                    $attempts++;
+                    continue;
+                }
+                throw $e;
+            }
+        }
+
+        // Fallback: use a timestamp-based suffix to guarantee uniqueness
+        return 'SALE-' . date('Y') . '-' . str_pad((int)(microtime(true) * 1000) % 10000, 4, '0', STR_PAD_LEFT);
     }
 }

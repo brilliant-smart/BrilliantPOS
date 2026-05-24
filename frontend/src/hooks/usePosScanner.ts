@@ -1,6 +1,6 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
-import { Product } from '@/types/ims';
-import { productApi } from '@/app/api/products';
+import { Product, ProductUnitType } from '@/types/ims';
+import { productApi, BarcodeSearchResult } from '@/app/api/products';
 import { toast } from 'sonner';
 
 export interface UsePosScanner {
@@ -15,7 +15,7 @@ export interface UsePosScanner {
 }
 
 interface UsePosScannerProps {
-  onProductScanned: (product: Product) => void;
+  onProductScanned: (product: Product, unitType?: ProductUnitType | null) => void;
   onError?: (message: string) => void;
 }
 
@@ -30,6 +30,7 @@ export const usePosScanner = ({
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
+  const searchAbortRef = useRef<AbortController | null>(null);
 
   // Focus scanner input
   const focusScanner = useCallback(() => {
@@ -43,12 +44,14 @@ export const usePosScanner = ({
     if (!barcode || barcode.trim().length < 3) return;
 
     setIsScanning(true);
-    
+
     try {
-      const product = await productApi.searchByBarcode(barcode);
+      const result: BarcodeSearchResult = await productApi.searchByBarcode(barcode);
+      const product = result.product;
+      const matchedUnitType = result.matched_unit_type || null;
       setLastScanned(product);
-      onProductScanned(product);
-      
+      onProductScanned(product, matchedUnitType);
+
       // Clear input and search results immediately
       if (scannerRef.current) {
         scannerRef.current.value = '';
@@ -56,26 +59,26 @@ export const usePosScanner = ({
       setSearchResults([]);
       setSearchQuery('');
       setIsSearching(false);
-      
+
       // Refocus scanner
       focusScanner();
-      
+
     } catch (error: any) {
       const message = error.response?.data?.message || 'Product not found';
-      
+
       if (onError) {
         onError(message);
       } else {
         toast.error(message);
       }
-      
+
       // Clear input and search on error
       if (scannerRef.current) {
         scannerRef.current.value = '';
       }
       setSearchResults([]);
       setSearchQuery('');
-      
+
       // Refocus scanner
       focusScanner();
     } finally {
@@ -101,14 +104,24 @@ export const usePosScanner = ({
 
     // Debounce search
     searchTimeoutRef.current = setTimeout(async () => {
+      // Cancel any in-flight search
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+      }
+      const abortController = new AbortController();
+      searchAbortRef.current = abortController;
+
       try {
-        const response = await productApi.search(query);
-        // Handle both paginated and non-paginated responses
-        const products = response.data || response;
-        setSearchResults(Array.isArray(products) ? products : []);
+        const response = await productApi.search(query, { signal: abortController.signal });
+        // searchProducts returns response.data which may be an array or { data: [...] }
+        const products = Array.isArray(response) ? response : (response?.data ?? []);
+        setSearchResults(products);
       } catch (error: any) {
-        console.error('Search failed:', error);
-        setSearchResults([]);
+        // Silently ignore cancelled requests
+        if (error.name !== 'CanceledError' && error.name !== 'AbortError') {
+          console.error('Search failed:', error);
+          setSearchResults([]);
+        }
       } finally {
         setIsSearching(false);
       }
@@ -118,7 +131,7 @@ export const usePosScanner = ({
   // Handle selecting a product from search results
   const handleSelectProduct = useCallback((product: Product) => {
     setLastScanned(product);
-    onProductScanned(product);
+    onProductScanned(product, null);
     
     // Clear search
     if (scannerRef.current) {

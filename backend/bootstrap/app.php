@@ -21,6 +21,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'hide.profit' => \App\Http\Middleware\HideProfitData::class,
             'auth.token' => \App\Http\Middleware\AuthenticateWithToken::class,
+            'role' => \App\Http\Middleware\RoleMiddleware::class,
+            'ip.whitelist' => \App\Http\Middleware\CheckIPWhitelist::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

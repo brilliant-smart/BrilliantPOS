@@ -3,25 +3,31 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Product;
 use App\Models\ProductBarcode;
+use App\Models\ProductUnitType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use App\Http\Requests\StoreProductRequest;
+use App\Http\Requests\UpdateProductRequest;
+use App\Traits\ConvertsDateToMonthEnd;
+use App\Traits\EscapesLikeWildcards;
 use Illuminate\Validation\Rule;
 
 class ProductController extends Controller
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, ConvertsDateToMonthEnd, EscapesLikeWildcards;
 
     /** Admin: List all products (including inactive) */
     public function adminIndex(Request $request)
     {
-        $query = Product::with('barcodes');
+        $query = Product::with(['barcodes', 'unitTypes']);
 
         // Filter by search query (name, SKU, barcode)
         if ($request->filled('search')) {
-            $search = $request->search;
+            $search = $this->escapeLike($request->search);
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'LIKE', "%{$search}%")
                   ->orWhere('sku', 'LIKE', "%{$search}%")
@@ -73,30 +79,79 @@ class ProductController extends Controller
         );
     }
 
-    /** Public: Search product by barcode */
+    /** Get a single product */
+    public function show(Product $product)
+    {
+        return response()->json($product->load(['barcodes', 'unitTypes']));
+    }
+
+    /** Cashier-accessible: Search products (active only, no cost/profit) */
+    public function search(Request $request)
+    {
+        $query = Product::where('is_active', true)
+            ->select(['id', 'name', 'sku', 'price', 'stock_quantity', 'image_url', 'low_stock_threshold', 'is_active', 'track_batch', 'track_expiry', 'expiry_date', 'batch_number']);
+
+        if ($request->filled('search')) {
+            $search = $this->escapeLike($request->search);
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'LIKE', "%{$search}%")
+                  ->orWhere('sku', 'LIKE', "%{$search}%")
+                  ->orWhereHas('barcodes', function ($bq) use ($search) {
+                      $bq->where('barcode', 'LIKE', "%{$search}%");
+                  });
+            });
+        }
+
+        $limit = min((int) $request->get('limit', 10), 50);
+
+        return response()->json(
+            $query->with(['barcodes', 'unitTypes'])->latest()->limit($limit)->get()
+        );
+    }
+
+    /** Public: Search product by barcode (cashier-accessible, limited fields) */
     public function searchByBarcode(Request $request)
     {
         $request->validate([
             'barcode' => 'required|string'
         ]);
 
-        $product = Product::whereHas('barcodes', function ($query) use ($request) {
-                $query->where('barcode', $request->barcode);
-            })
-            ->where('is_active', true)
+        $barcodeRecord = ProductBarcode::where('barcode', $request->barcode)
+            ->with('unitType')
             ->first();
 
-        if (!$product) {
+        if (!$barcodeRecord) {
             return response()->json([
                 'message' => 'Product not found with barcode: ' . $request->barcode
             ], 404);
         }
 
-        return response()->json($product->load('barcodes'));
+        // Select only cashier-safe fields — exclude cost/profit data
+        $product = Product::where('id', $barcodeRecord->product_id)
+            ->where('is_active', true)
+            ->select(['id', 'name', 'sku', 'price', 'stock_quantity', 'image_url', 'low_stock_threshold', 'is_active', 'unit_type', 'track_batch', 'track_expiry', 'expiry_date', 'batch_number'])
+            ->with(['barcodes:product_id,barcode,product_unit_type_id', 'unitTypes:id,product_id,name,conversion_factor,selling_price'])
+            ->first();
+
+        if (!$product) {
+            return response()->json([
+                'message' => 'Product not found or inactive'
+            ], 404);
+        }
+
+        $matchedUnitType = null;
+        if ($barcodeRecord->product_unit_type_id) {
+            $matchedUnitType = $barcodeRecord->unitType;
+        }
+
+        return response()->json([
+            'product' => $product,
+            'matched_unit_type' => $matchedUnitType,
+        ]);
     }
 
     /** Protected: Create product */
-    public function store(Request $request)
+    public function store(StoreProductRequest $request)
     {
         // Convert month/year expiry date (YYYY-MM) to last day of month (YYYY-MM-DD)
         if ($request->filled('expiry_date')) {
@@ -105,25 +160,7 @@ class ProductController extends Controller
             ]);
         }
 
-        $validated = $request->validate([
-            'name'                => ['required', 'string', 'max:255'],
-            'slug'                => ['required', 'string', 'max:255', Rule::unique('products')->whereNull('deleted_at')],
-            'sku'                 => ['nullable', 'string', 'max:100', Rule::unique('products')->whereNull('deleted_at')],
-            'barcodes'            => ['nullable', 'array'],
-            'barcodes.*'          => ['nullable', 'string', 'max:100'],
-            'description'         => ['nullable', 'string'],
-            'price'               => ['required', 'numeric', 'min:0'],
-            'stock_quantity'      => ['nullable', 'integer', 'min:0'],
-            'low_stock_threshold' => ['nullable', 'integer', 'min:0'],
-            'image'               => ['nullable', 'image', 'max:2048'],
-            'is_active'           => ['boolean'],
-            'is_featured'         => ['boolean'],
-            'track_batch'         => ['boolean'],
-            'track_expiry'        => ['boolean'],
-            'batch_number'        => ['nullable', 'string', 'max:255'],
-            'manufacturing_date'  => ['nullable', 'date', 'before_or_equal:today'],
-            'expiry_date'         => ['nullable', 'date', 'after_or_equal:today'],
-        ]);
+        $validated = $request->validated();
 
         // Role check: only owner or manager can create products
         if (!in_array($request->user()->role, ['owner', 'manager'])) {
@@ -147,7 +184,41 @@ class ProductController extends Controller
 
         $product = Product::create($validated);
 
-        // Handle barcodes
+        // Handle unit types
+        if ($request->has('_has_unit_types') && is_array($request->unit_types)) {
+            foreach ($request->unit_types as $unitTypeData) {
+                $unitType = $product->unitTypes()->create([
+                    'name' => $unitTypeData['name'],
+                    'short_name' => $unitTypeData['short_name'] ?? substr($unitTypeData['name'], 0, 3),
+                    'conversion_factor' => $unitTypeData['conversion_factor'] ?? 1,
+                    'selling_price' => $unitTypeData['selling_price'] ?? $product->price,
+                    'is_base' => $unitTypeData['is_base'] ?? false,
+                    'sort_order' => $unitTypeData['sort_order'] ?? 0,
+                ]);
+
+                // Handle barcodes for this unit type
+                if (!empty($unitTypeData['barcodes'])) {
+                    $unitBarcodes = array_filter($unitTypeData['barcodes'], fn($b) => !empty(trim($b)));
+                    foreach ($unitBarcodes as $barcode) {
+                        $barcode = trim($barcode);
+                        $existing = ProductBarcode::where('barcode', $barcode)
+                            ->whereHas('product', function ($q) {
+                                $q->whereNull('deleted_at');
+                            })
+                            ->first();
+                        if ($existing) {
+                            continue; // Skip duplicates silently for unit type barcodes
+                        }
+                        $product->barcodes()->create([
+                            'barcode' => $barcode,
+                            'product_unit_type_id' => $unitType->id,
+                        ]);
+                    }
+                }
+            }
+        }
+
+        // Handle legacy barcodes (not linked to unit types)
         if ($request->has('_has_barcodes')) {
             $barcodes = array_filter($request->barcodes ?? [], fn($b) => !empty(trim($b)));
 
@@ -167,15 +238,20 @@ class ProductController extends Controller
             }
 
             foreach ($barcodes as $barcode) {
-                $product->barcodes()->create(['barcode' => trim($barcode)]);
+                $product->barcodes()->create([
+                    'barcode' => trim($barcode),
+                    'product_unit_type_id' => null,
+                ]);
             }
         }
 
-        return response()->json($product->load('barcodes'), 201);
+        AuditLog::log('product.create', $product, null, $product->toArray(), "Product {$product->name} created");
+
+        return response()->json($product->load(['barcodes', 'unitTypes']), 201);
     }
 
     /** Protected: Update product */
-    public function update(Request $request, Product $product)
+    public function update(UpdateProductRequest $request, Product $product)
     {
         $this->authorize('update', $product);
 
@@ -186,25 +262,7 @@ class ProductController extends Controller
             ]);
         }
 
-        $validated = $request->validate([
-            'name'                => ['sometimes', 'string', 'max:255'],
-            'slug'                => ['sometimes', 'string', 'max:255', Rule::unique('products')->whereNull('deleted_at')->ignore($product->id)],
-            'sku'                 => ['sometimes', 'string', 'max:100', Rule::unique('products')->whereNull('deleted_at')->ignore($product->id)],
-            'barcodes'            => ['nullable', 'array'],
-            'barcodes.*'          => ['nullable', 'string', 'max:100'],
-            'description'         => ['nullable', 'string'],
-            'price'               => ['sometimes', 'numeric', 'min:0'],
-            'stock_quantity'      => ['sometimes', 'integer', 'min:0'],
-            'low_stock_threshold' => ['sometimes', 'integer', 'min:0'],
-            'image'               => ['nullable', 'image', 'max:2048'],
-            'is_active'           => ['boolean'],
-            'is_featured'         => ['boolean'],
-            'track_batch'         => ['boolean'],
-            'track_expiry'        => ['boolean'],
-            'batch_number'        => ['nullable', 'string', 'max:255'],
-            'manufacturing_date'  => ['nullable', 'date', 'before_or_equal:today'],
-            'expiry_date'         => ['nullable', 'date', 'after_or_equal:today'],
-        ]);
+        $validated = $request->validated();
 
         if ($request->hasFile('image')) {
             // Delete old image
@@ -231,11 +289,95 @@ class ProductController extends Controller
             }
         }
 
+        $oldValues = $product->toArray();
         $product->update($validated);
 
-        // Handle barcodes: replace all barcodes for this product
+        AuditLog::log('product.update', $product, $oldValues, $product->toArray(), "Product {$product->name} updated");
+
+        // Sync base unit type selling price with product price
+        $baseUnitType = $product->unitTypes()->where('is_base', true)->first();
+        if ($baseUnitType && $product->isDirty('price')) {
+            $baseUnitType->update(['selling_price' => $product->price]);
+        }
+
+        // Handle unit types: sync
+        if ($request->has('_has_unit_types')) {
+            if ($request->has('unit_types_clear')) {
+                // Delete all non-base unit types and their barcodes
+                $nonBaseTypes = $product->unitTypes()->where('is_base', false)->get();
+                foreach ($nonBaseTypes as $nonBaseType) {
+                    ProductBarcode::where('product_unit_type_id', $nonBaseType->id)->delete();
+                    $nonBaseType->delete();
+                }
+            } elseif (is_array($request->unit_types)) {
+                $existingIds = [];
+                foreach ($request->unit_types as $unitTypeData) {
+                    if (!empty($unitTypeData['id'])) {
+                        $unitType = ProductUnitType::where('id', $unitTypeData['id'])
+                            ->where('product_id', $product->id)
+                            ->first();
+                        if ($unitType) {
+                            $unitType->update([
+                                'name' => $unitTypeData['name'] ?? $unitType->name,
+                                'short_name' => $unitTypeData['short_name'] ?? $unitType->short_name,
+                                'conversion_factor' => $unitTypeData['conversion_factor'] ?? $unitType->conversion_factor,
+                                'selling_price' => $unitTypeData['selling_price'] ?? $unitType->selling_price,
+                                'is_base' => $unitTypeData['is_base'] ?? $unitType->is_base,
+                                'sort_order' => $unitTypeData['sort_order'] ?? $unitType->sort_order,
+                            ]);
+                            $existingIds[] = $unitType->id;
+                        }
+                    } else {
+                        $unitType = $product->unitTypes()->create([
+                            'name' => $unitTypeData['name'],
+                            'short_name' => $unitTypeData['short_name'] ?? substr($unitTypeData['name'], 0, 3),
+                            'conversion_factor' => $unitTypeData['conversion_factor'] ?? 1,
+                            'selling_price' => $unitTypeData['selling_price'] ?? $product->price,
+                            'is_base' => $unitTypeData['is_base'] ?? false,
+                            'sort_order' => $unitTypeData['sort_order'] ?? 0,
+                        ]);
+                        $existingIds[] = $unitType->id;
+                    }
+
+                    // Handle barcodes for this unit type
+                    if (isset($unitType)) {
+                        // Always remove old barcodes for this unit type first
+                        ProductBarcode::where('product_unit_type_id', $unitType->id)->delete();
+
+                        if (!empty($unitTypeData['barcodes'])) {
+                            $unitBarcodes = array_filter($unitTypeData['barcodes'], fn($b) => !empty(trim($b)));
+                            foreach ($unitBarcodes as $barcode) {
+                                $barcode = trim($barcode);
+                                $existing = ProductBarcode::where('barcode', $barcode)
+                                    ->where('product_id', '!=', $product->id)
+                                    ->whereHas('product', function ($q) {
+                                        $q->whereNull('deleted_at');
+                                    })
+                                    ->first();
+                                if (!$existing) {
+                                    $product->barcodes()->create([
+                                        'barcode' => $barcode,
+                                        'product_unit_type_id' => $unitType->id,
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Delete unit types not in the request (except base unit type)
+                $product->unitTypes()
+                    ->where('is_base', false)
+                    ->whereNotIn('id', $existingIds)
+                    ->delete();
+            }
+        }
+
+        // Handle legacy barcodes: replace all barcodes not linked to unit types
         if ($request->has('_has_barcodes')) {
-            $product->barcodes()->delete();
+            // Delete all unlinked barcodes (legacy barcodes)
+            ProductBarcode::where('product_id', $product->id)
+                ->whereNull('product_unit_type_id')
+                ->delete();
 
             $barcodes = array_filter($request->barcodes ?? [], fn($b) => !empty(trim($b)));
 
@@ -256,11 +398,14 @@ class ProductController extends Controller
             }
 
             foreach ($barcodes as $barcode) {
-                $product->barcodes()->create(['barcode' => trim($barcode)]);
+                $product->barcodes()->create([
+                    'barcode' => trim($barcode),
+                    'product_unit_type_id' => null,
+                ]);
             }
         }
 
-        return response()->json($product->load('barcodes'));
+        return response()->json($product->load(['barcodes', 'unitTypes']));
     }
 
     /** Protected: Delete product */
@@ -272,44 +417,12 @@ class ProductController extends Controller
             Storage::disk('public')->delete($product->image_url);
         }
 
+        AuditLog::log('product.delete', $product, null, null, "Product {$product->name} deleted");
+
         $product->delete();
 
         return response()->json([
             'message' => 'Product deleted successfully',
         ]);
-    }
-
-    /**
-     * Convert month/year format (YYYY-MM) to last day of month (YYYY-MM-DD)
-     * Example: "2026-03" becomes "2026-03-31"
-     * Full dates are passed through unchanged
-     */
-    private function convertToLastDayOfMonth($date)
-    {
-        if (empty($date)) {
-            return $date;
-        }
-
-        // If already a full date (YYYY-MM-DD), return as is
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            return $date;
-        }
-
-        // If month/year format (YYYY-MM), convert to last day of month
-        if (preg_match('/^\d{4}-\d{2}$/', $date)) {
-            try {
-                $dateObj = \DateTime::createFromFormat('Y-m', $date);
-                if ($dateObj) {
-                    // Get last day of the month
-                    return $dateObj->format('Y-m-t');
-                }
-            } catch (\Exception $e) {
-                // If parsing fails, return original
-                return $date;
-            }
-        }
-
-        // Return original if format not recognized
-        return $date;
     }
 }

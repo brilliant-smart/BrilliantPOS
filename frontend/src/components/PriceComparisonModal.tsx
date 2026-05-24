@@ -74,7 +74,7 @@ export default function PriceComparisonModal({
     } else if (newPrice < oldPrice) {
       return <TrendingDown className="h-4 w-4 text-green-500 dark:text-green-400" />;
     }
-    return <Minus className="h-4 w-4 text-muted-foreground" />;
+    return <Minus className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />;
   };
 
   const getPriceChangeBadge = (oldPrice: number, newPrice: number) => {
@@ -135,7 +135,7 @@ export default function PriceComparisonModal({
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <h3 className="font-semibold text-lg">{product.product_name}</h3>
-                    <p className="text-sm text-muted-foreground">SKU: {product.sku}</p>
+                    <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">SKU: {product.sku}</p>
                   </div>
                   
                   {currentPrice && lastPrice && (
@@ -149,17 +149,17 @@ export default function PriceComparisonModal({
                 {/* Current vs Last Price */}
                 <div className="grid grid-cols-3 gap-4 mb-4 bg-muted p-3 rounded">
                   <div>
-                    <p className="text-xs text-muted-foreground">Last Purchase Price</p>
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">Last Purchase Price</p>
                     <p className="text-lg font-semibold">₦{lastPrice?.toFixed(2) || 'N/A'}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Current Input Price</p>
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">Current Input Price</p>
                     <p className="text-lg font-semibold text-blue-600 dark:text-blue-400">
                       ₦{currentPrice?.toFixed(2) || 'Not Set'}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Average Cost Price</p>
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">Average Cost Price</p>
                     <p className="text-lg font-semibold">₦{product.current_cost_price?.toFixed(2) || 'N/A'}</p>
                   </div>
                 </div>
@@ -187,7 +187,7 @@ export default function PriceComparisonModal({
                               ₦{history.price.toFixed(2)}
                             </TableCell>
                             <TableCell>{history.supplier || 'N/A'}</TableCell>
-                            <TableCell className="text-muted-foreground">{history.reference || 'N/A'}</TableCell>
+                            <TableCell className="text-muted-foreground dark:text-muted-foreground/80">{history.reference || 'N/A'}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -196,7 +196,7 @@ export default function PriceComparisonModal({
                 )}
 
                 {(!product.price_history || product.price_history.length === 0) && (
-                  <p className="text-sm text-muted-foreground italic">No purchase history available</p>
+                  <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 italic">No purchase history available</p>
                 )}
               </div>
             );

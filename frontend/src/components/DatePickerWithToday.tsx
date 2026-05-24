@@ -5,6 +5,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { parseLocalDate } from '@/utils/date';
 
 interface DatePickerWithTodayProps {
   value: string; // ISO date string (YYYY-MM-DD)
@@ -17,9 +18,9 @@ interface DatePickerWithTodayProps {
   maxDate?: Date;
 }
 
-export function DatePickerWithToday({ 
-  value, 
-  onChange, 
+export function DatePickerWithToday({
+  value,
+  onChange,
   placeholder = "Pick a date",
   disabled = false,
   required = false,
@@ -29,7 +30,7 @@ export function DatePickerWithToday({
 }: DatePickerWithTodayProps) {
   const [open, setOpen] = useState(false);
 
-  const dateValue = value ? new Date(value) : undefined;
+  const dateValue = value ? parseLocalDate(value) : undefined;
 
   const handleSelect = (date: Date | undefined) => {
     if (date) {
@@ -56,13 +57,13 @@ export function DatePickerWithToday({
           variant="outline"
           className={cn(
             "w-full justify-between text-left font-normal",
-            !value && "text-muted-foreground",
+            !value && "text-muted-foreground dark:text-muted-foreground/80",
             className
           )}
           disabled={disabled}
         >
-          <span>{value ? format(new Date(value), 'PPP') : placeholder}</span>
-          <CalendarIcon className="ml-2 h-4 w-4 opacity-50" />
+          <span>{value ? format(parseLocalDate(value), 'PPP') : placeholder}</span>
+          <CalendarIcon className="ml-2 h-4 w-4 text-muted-foreground dark:text-foreground/70" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="end">

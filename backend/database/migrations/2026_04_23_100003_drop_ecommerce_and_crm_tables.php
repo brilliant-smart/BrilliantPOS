@@ -8,6 +8,8 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::getDriverName() === 'sqlite') { return; }
+
         // Disable FK checks to drop tables with circular/referencing constraints
         DB::statement('SET FOREIGN_KEY_CHECKS=0');
 
@@ -66,6 +68,8 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') { return; }
+
         // This migration is not reversible
     }
 };

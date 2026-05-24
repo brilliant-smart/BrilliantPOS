@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\ProductBatch;
 use App\Services\BatchTrackingService;
+use App\Traits\ConvertsDateToMonthEnd;
 use Illuminate\Http\Request;
 
 class BatchTrackingController extends Controller
 {
+    use ConvertsDateToMonthEnd;
     protected $batchService;
 
     public function __construct(BatchTrackingService $batchService)
@@ -78,6 +81,8 @@ class BatchTrackingController extends Controller
 
         $batch = $this->batchService->createBatch($validated);
 
+        AuditLog::log('batch.create', $batch, null, $batch->toArray(), "Batch {$batch->batch_number} created");
+
         return response()->json([
             'message' => 'Batch created successfully',
             'batch' => $batch->load(['product', 'supplier']),
@@ -105,6 +110,8 @@ class BatchTrackingController extends Controller
         ]);
 
         $batch->update($validated);
+
+        AuditLog::log('batch.update', $batch, null, $batch->toArray(), "Batch {$batch->batch_number} updated");
 
         return response()->json([
             'message' => 'Batch updated successfully',
@@ -153,6 +160,8 @@ class BatchTrackingController extends Controller
 
         $this->batchService->markBatchAsExpired($batch);
 
+        AuditLog::log('batch.mark_expired', $batch, null, null, "Batch {$batch->batch_number} marked as expired");
+
         return response()->json([
             'message' => 'Batch marked as expired successfully',
         ]);
@@ -166,39 +175,5 @@ class BatchTrackingController extends Controller
         $report = $this->batchService->getBatchInventoryReport();
 
         return response()->json($report);
-    }
-
-    /**
-     * Convert month/year format (YYYY-MM) to last day of month (YYYY-MM-DD)
-     * Example: "2026-03" becomes "2026-03-31"
-     * Full dates are passed through unchanged
-     */
-    private function convertToLastDayOfMonth($date)
-    {
-        if (empty($date)) {
-            return $date;
-        }
-
-        // If already a full date (YYYY-MM-DD), return as is
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            return $date;
-        }
-
-        // If month/year format (YYYY-MM), convert to last day of month
-        if (preg_match('/^\d{4}-\d{2}$/', $date)) {
-            try {
-                $dateObj = \DateTime::createFromFormat('Y-m', $date);
-                if ($dateObj) {
-                    // Get last day of the month
-                    return $dateObj->format('Y-m-t');
-                }
-            } catch (\Exception $e) {
-                // If parsing fails, return original
-                return $date;
-            }
-        }
-
-        // Return original if format not recognized
-        return $date;
     }
 }

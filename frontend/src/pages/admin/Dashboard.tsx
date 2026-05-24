@@ -1,7 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import axios from "axios";
 import { api } from "@/app/lib/api";
 import { useNavigate } from "react-router-dom";
 import {
@@ -96,33 +97,37 @@ export default function Dashboard() {
   const [expiryAlerts, setExpiryAlerts] = useState<any[]>([]);
   const navigate = useNavigate();
   const { user } = useAuth();
+  const abortRef = useRef<AbortController | null>(null);
 
-  const loadStats = (days: number = 30) => {
+  const loadStats = (days: number = 30, signal?: AbortSignal) => {
     setLoading(true);
-    api.get(`/admin/dashboard-stats?days=${days}`)
+    api.get(`/admin/dashboard-stats?days=${days}`, { signal })
       .then((res) => {
         setStats(res.data);
         setLoading(false);
       })
       .catch((err) => {
+        if (axios.isCancel(err)) return;
         console.error("Error loading dashboard stats:", err);
         setLoading(false);
       });
   };
 
-  const loadPOAlerts = async () => {
+  const loadPOAlerts = async (signal?: AbortSignal) => {
     try {
       // Load pending POs for approval (Owner only)
       if (user?.role === 'owner') {
         const pendingResponse = await api.get('/purchase-orders', {
-          params: { status: 'pending', per_page: 5 }
+          params: { status: 'pending', per_page: 5 },
+          signal,
         });
         setPendingPOs(pendingResponse.data.data || []);
       }
 
       // Load unpaid/partially paid POs
       const unpaidResponse = await api.get('/purchase-orders', {
-        params: { per_page: 100 }
+        params: { per_page: 100 },
+        signal,
       });
       const allPOs = unpaidResponse.data.data || [];
       const needsPayment = allPOs.filter((po: any) =>
@@ -132,22 +137,27 @@ export default function Dashboard() {
       setUnpaidPOs(needsPayment.slice(0, 5));
 
       // Load low stock alerts
-      const lowStockResponse = await api.get('/alerts/low-stock');
+      const lowStockResponse = await api.get('/alerts/low-stock', { signal });
       setLowStockAlerts((lowStockResponse.data.alerts || []).slice(0, 5));
 
       // Load expiring batches
       const expiryResponse = await api.get('/alerts/expiring-batches', {
-        params: { days: 90 }
+        params: { days: 90 },
+        signal,
       });
       setExpiryAlerts((expiryResponse.data.alerts || []).slice(0, 5));
-    } catch (error) {
+    } catch (error: any) {
+      if (axios.isCancel(error)) return;
       console.error('Failed to load alerts:', error);
     }
   };
 
   useEffect(() => {
-    loadStats(dateRange);
-    loadPOAlerts();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    loadStats(dateRange, controller.signal);
+    loadPOAlerts(controller.signal);
+    return () => controller.abort();
   }, [dateRange]);
 
   const handleDateRangeChange = (days: number) => {
@@ -158,7 +168,7 @@ export default function Dashboard() {
     return (
       <div className="p-4 md:p-6">
         <h1 className="text-3xl font-display mb-6">Dashboard</h1>
-        <div className="text-muted-foreground">Loading analytics...</div>
+        <div className="text-muted-foreground dark:text-muted-foreground/80">Loading analytics...</div>
       </div>
     );
   }
@@ -166,12 +176,12 @@ export default function Dashboard() {
   const isOwner = user?.role === "owner";
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       {/* Header with Quick Actions */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground dark:text-muted-foreground/80 mt-1">
             Overview of your store's performance and analytics
           </p>
         </div>
@@ -229,7 +239,7 @@ export default function Dashboard() {
                 >
                   <div>
                     <p className="font-medium">{po.po_number}</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                       {po.supplier?.name} - #{po.total_amount?.toLocaleString()}
                     </p>
                   </div>
@@ -273,7 +283,7 @@ export default function Dashboard() {
                 >
                   <div>
                     <p className="font-medium">{po.po_number}</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                       Balance: #{((po.total_amount || 0) - (po.amount_paid || 0)).toLocaleString()}
                     </p>
                   </div>
@@ -318,7 +328,7 @@ export default function Dashboard() {
                 >
                   <div>
                     <p className="font-medium">{alert.name}</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                       Stock: {alert.stock_quantity} (Reorder at: {alert.reorder_level})
                     </p>
                   </div>
@@ -372,7 +382,7 @@ export default function Dashboard() {
                 >
                   <div>
                     <p className="font-medium">{alert.product_name}</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                       Batch: {alert.batch_number} - Qty: {alert.quantity_remaining} - Expires in {Math.round(alert.days_until_expiry)} days
                     </p>
                   </div>
@@ -397,7 +407,7 @@ export default function Dashboard() {
 
       {/* Date Range Filter */}
       <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Time Period:</span>
+        <span className="text-sm text-muted-foreground dark:text-muted-foreground/80">Time Period:</span>
         <div className="flex gap-2">
           <Button
             size="sm"
@@ -423,18 +433,19 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* User Statistics */}
+      {/* User Statistics - Owner/Manager only */}
+      {(isOwner || user?.role === 'manager') && (
       <div>
         <h2 className="text-xl font-semibold mb-4">User Statistics</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <Users className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">{stats?.totalUsers ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                 All registered users
               </p>
             </CardContent>
@@ -443,11 +454,11 @@ export default function Dashboard() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Active Users</CardTitle>
-              <UserCheck className="h-4 w-4 text-muted-foreground" />
+              <UserCheck className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-green-600 dark:text-green-400">{stats?.activeUsers ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                 Currently active accounts
               </p>
             </CardContent>
@@ -456,11 +467,11 @@ export default function Dashboard() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Owners</CardTitle>
-              <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+              <ShieldCheck className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats?.owners ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                 System owners
               </p>
             </CardContent>
@@ -469,19 +480,20 @@ export default function Dashboard() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Managers & Cashiers</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <Users className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-purple-600 dark:text-purple-400">
                 {((stats?.managers ?? 0) + (stats?.cashiers ?? 0))}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                 {(stats?.managers ?? 0)} managers, {(stats?.cashiers ?? 0)} cashiers
               </p>
             </CardContent>
           </Card>
         </div>
       </div>
+      )}
 
       {/* User Analytics Charts */}
       {isOwner && (
@@ -520,7 +532,7 @@ export default function Dashboard() {
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-center text-muted-foreground py-12">No user data available</p>
+                <p className="text-center text-muted-foreground dark:text-muted-foreground/80 py-12">No user data available</p>
               )}
             </CardContent>
           </Card>
@@ -560,7 +572,7 @@ export default function Dashboard() {
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-center text-muted-foreground py-12">No user data available</p>
+                <p className="text-center text-muted-foreground dark:text-muted-foreground/80 py-12">No user data available</p>
               )}
             </CardContent>
           </Card>
@@ -574,11 +586,11 @@ export default function Dashboard() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Products</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
+              <Package className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">{stats?.totalProducts ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                 All products in catalog
               </p>
             </CardContent>
@@ -593,7 +605,7 @@ export default function Dashboard() {
               <div className="text-3xl font-bold text-green-600 dark:text-green-400">
                 {stats?.activeProducts ?? 0}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                 Currently available
               </p>
             </CardContent>
@@ -608,7 +620,7 @@ export default function Dashboard() {
               <div className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">
                 {stats?.featuredProducts ?? 0}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                 Highlighted on homepage
               </p>
             </CardContent>
@@ -641,11 +653,11 @@ export default function Dashboard() {
                         {stats.productTrend}%
                       </span>
                     )}
-                    <span className="text-muted-foreground">vs previous period</span>
+                    <span className="text-muted-foreground dark:text-muted-foreground/80">vs previous period</span>
                   </>
                 )}
                 {(stats?.productTrend === undefined || stats.productTrend === 0) && (
-                  <span className="text-muted-foreground">Last {stats?.period?.days ?? 30} days</span>
+                  <span className="text-muted-foreground dark:text-muted-foreground/80">Last {stats?.period?.days ?? 30} days</span>
                 )}
               </div>
             </CardContent>
@@ -683,7 +695,7 @@ export default function Dashboard() {
                           </Badge>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+                      <div className="flex items-center gap-3 text-sm text-muted-foreground dark:text-muted-foreground/80 mt-1">
                         <span>#{product.price?.toLocaleString() ?? 0}</span>
                         <span>-</span>
                         <span>{new Date(product.created_at).toLocaleDateString()}</span>
@@ -693,7 +705,7 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : (
-              <p className="text-muted-foreground text-center py-8">
+              <p className="text-muted-foreground dark:text-muted-foreground/80 text-center py-8">
                 No recent products added
               </p>
             )}

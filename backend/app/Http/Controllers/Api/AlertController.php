@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\BatchTrackingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Models\Product;
@@ -18,8 +19,8 @@ class AlertController extends Controller
     {
         // Products where current stock <= reorder level
         $lowStockProducts = Product::where('is_active', true)
-            ->whereColumn('stock_quantity', '<=', 'reorder_level')
-            ->where('reorder_level', '>', 0)
+            ->whereColumn('stock_quantity', '<=', 'reorder_point')
+            ->where('reorder_point', '>', 0)
             ->orderBy('stock_quantity', 'asc')
             ->limit(20)
             ->get();
@@ -31,9 +32,9 @@ class AlertController extends Controller
                     'name' => $product->name,
                     'sku' => $product->sku,
                     'stock_quantity' => $product->stock_quantity,
-                    'reorder_level' => $product->reorder_level,
+                    'reorder_point' => $product->reorder_point,
                     'severity' => $product->stock_quantity == 0 ? 'critical' :
-                                 ($product->stock_quantity <= ($product->reorder_level / 2) ? 'high' : 'medium'),
+                                 ($product->stock_quantity <= ($product->reorder_point / 2) ? 'high' : 'medium'),
                 ];
             }),
             'count' => $lowStockProducts->count(),
@@ -80,7 +81,7 @@ class AlertController extends Controller
     }
 
     /**
-     * Get expired batches
+     * Get expired batches (read-only, does NOT auto-mark)
      */
     public function expiredBatches(Request $request)
     {
@@ -92,11 +93,6 @@ class AlertController extends Controller
             ->orderBy('expiry_date', 'desc')
             ->limit(20)
             ->get();
-
-        // Auto-mark as expired
-        foreach ($expiredBatches as $batch) {
-            $batch->update(['status' => 'expired']);
-        }
 
         return response()->json([
             'alerts' => $expiredBatches->map(function ($batch) {
@@ -115,13 +111,47 @@ class AlertController extends Controller
     }
 
     /**
+     * Mark expired batches (explicit POST action)
+     * POST /api/alerts/mark-expired
+     */
+    public function markExpiredBatches(Request $request)
+    {
+        $validated = $request->validate([
+            'batch_ids' => 'nullable|array',
+            'batch_ids.*' => 'integer|exists:product_batches,id',
+        ]);
+
+        $query = ProductBatch::where('status', 'active')
+            ->where('quantity_remaining', '>', 0)
+            ->whereNotNull('expiry_date')
+            ->where('expiry_date', '<', Carbon::now());
+
+        if (!empty($validated['batch_ids'])) {
+            $query->whereIn('id', $validated['batch_ids']);
+        }
+
+        $batches = $query->get();
+        $marked = 0;
+
+        foreach ($batches as $batch) {
+            app(BatchTrackingService::class)->markBatchAsExpired($batch);
+            $marked++;
+        }
+
+        return response()->json([
+            'message' => "{$marked} batches marked as expired",
+            'marked' => $marked,
+        ]);
+    }
+
+    /**
      * Get all alerts summary
      */
     public function summary(Request $request)
     {
         $lowStockCount = Product::where('is_active', true)
-            ->whereColumn('stock_quantity', '<=', 'reorder_level')
-            ->where('reorder_level', '>', 0)
+            ->whereColumn('stock_quantity', '<=', 'reorder_point')
+            ->where('reorder_point', '>', 0)
             ->count();
 
         $expiringCount = ProductBatch::where('status', 'active')

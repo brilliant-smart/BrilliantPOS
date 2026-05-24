@@ -159,7 +159,7 @@ class AdvancedReportingService
                         'quantity_sold' => 0,
                     ];
                 }
-                $productRevenue[$productId]['revenue'] += $item->total_price;
+                $productRevenue[$productId]['revenue'] += $item->line_total;
                 $productRevenue[$productId]['quantity_sold'] += $item->quantity;
             }
         }

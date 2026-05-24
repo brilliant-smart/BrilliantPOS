@@ -13,9 +13,11 @@ class PurchaseOrderItem extends Model
     protected $fillable = [
         'purchase_order_id',
         'product_id',
+        'product_unit_type_id',
         'quantity_ordered',
         'quantity_received',
         'unit_type',
+        'conversion_factor',
         'unit_cost',
         'vat_rate',
         'discount_percent',
@@ -27,8 +29,10 @@ class PurchaseOrderItem extends Model
     ];
 
     protected $casts = [
+        'product_unit_type_id' => 'integer',
         'quantity_ordered' => 'integer',
         'quantity_received' => 'integer',
+        'conversion_factor' => 'decimal:2',
         'unit_cost' => 'decimal:2',
         'vat_rate' => 'decimal:2',
         'discount_percent' => 'decimal:2',
@@ -48,6 +52,11 @@ class PurchaseOrderItem extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function unitType(): BelongsTo
+    {
+        return $this->belongsTo(ProductUnitType::class, 'product_unit_type_id');
     }
 
     /**

@@ -48,7 +48,7 @@ export default function ExpenseAnalytics() {
     return (
       <div className="p-4 md:p-6">
         <div className="text-center py-12">
-          <p className="text-muted-foreground">Loading analytics...</p>
+          <p className="text-muted-foreground dark:text-muted-foreground/80">Loading analytics...</p>
         </div>
       </div>
     );
@@ -70,7 +70,7 @@ export default function ExpenseAnalytics() {
           </Link>
           <div>
             <h1 className="text-3xl font-bold">Expense Analytics</h1>
-            <p className="text-muted-foreground">Insights and trends for your expenses</p>
+            <p className="text-muted-foreground dark:text-muted-foreground/80">Insights and trends for your expenses</p>
           </div>
         </div>
 
@@ -92,33 +92,33 @@ export default function ExpenseAnalytics() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-            <List className="h-4 w-4 text-muted-foreground" />
+            <List className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{analytics.summary.total_expenses}</div>
-            <p className="text-xs text-muted-foreground">Number of transactions</p>
+            <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">Number of transactions</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Amount</CardTitle>
-            <Wallet className="h-4 w-4 text-muted-foreground" />
+            <Wallet className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(analytics.summary.total_amount)}</div>
-            <p className="text-xs text-muted-foreground">Total spent</p>
+            <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">Total spent</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Average Expense</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <TrendingUp className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(analytics.summary.average_expense)}</div>
-            <p className="text-xs text-muted-foreground">Per transaction</p>
+            <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">Per transaction</p>
           </CardContent>
         </Card>
       </div>
@@ -156,7 +156,7 @@ export default function ExpenseAnalytics() {
                           }}
                         />
                       </div>
-                      <span className="text-xs text-muted-foreground w-12 text-right">{percentage}%</span>
+                      <span className="text-xs text-muted-foreground dark:text-muted-foreground/80 w-12 text-right">{percentage}%</span>
                     </div>
                   </div>
                 );
@@ -184,7 +184,7 @@ export default function ExpenseAnalytics() {
                       <span className="font-medium capitalize">{payment.method.replace('_', ' ')}</span>
                       <div className="text-right">
                         <div className="font-bold">{formatCurrency(payment.amount)}</div>
-                        <div className="text-xs text-muted-foreground">{payment.count} transactions</div>
+                        <div className="text-xs text-muted-foreground dark:text-muted-foreground/80">{payment.count} transactions</div>
                       </div>
                     </div>
                     <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -218,7 +218,7 @@ export default function ExpenseAnalytics() {
                     </div>
                     <div>
                       <div className="font-medium">{vendor.vendor}</div>
-                      <div className="text-sm text-muted-foreground">{vendor.count} transactions</div>
+                      <div className="text-sm text-muted-foreground dark:text-muted-foreground/80">{vendor.count} transactions</div>
                     </div>
                   </div>
                   <div className="font-bold">{formatCurrency(vendor.amount)}</div>
@@ -242,7 +242,7 @@ export default function ExpenseAnalytics() {
                 <div key={index} className="flex items-center justify-between text-sm">
                   <span className="font-medium">{new Date(day.date).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}</span>
                   <div className="flex items-center gap-4">
-                    <span className="text-muted-foreground">{day.count} expenses</span>
+                    <span className="text-muted-foreground dark:text-muted-foreground/80">{day.count} expenses</span>
                     <span className="font-bold">{formatCurrency(day.amount)}</span>
                   </div>
                 </div>

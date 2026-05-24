@@ -47,7 +47,10 @@ export function ProductSearchSelect({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-full justify-between font-normal"
+          className={cn(
+            "w-full justify-between font-normal",
+            !selectedProduct && "text-muted-foreground hover:text-accent-foreground dark:text-muted-foreground/80 dark:hover:text-accent-foreground"
+          )}
         >
           {selectedProduct ? (
             <span className="truncate">
@@ -59,9 +62,9 @@ export function ProductSearchSelect({
               )}
             </span>
           ) : (
-            <span className="text-muted-foreground">{placeholder}</span>
+            <span>{placeholder}</span>
           )}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground dark:text-foreground/70" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">

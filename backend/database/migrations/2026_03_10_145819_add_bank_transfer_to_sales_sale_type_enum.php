@@ -15,6 +15,8 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (DB::getDriverName() === 'sqlite') { return; }
+
         // MySQL doesn't support direct enum modification, need to use raw SQL
         DB::statement("ALTER TABLE sales MODIFY COLUMN sale_type ENUM('cash', 'credit', 'online', 'pos', 'bank_transfer') NOT NULL DEFAULT 'cash'");
     }
@@ -24,6 +26,8 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') { return; }
+
         // Remove bank_transfer from enum (only if no records use it)
         DB::statement("ALTER TABLE sales MODIFY COLUMN sale_type ENUM('cash', 'credit', 'online', 'pos') NOT NULL DEFAULT 'cash'");
     }

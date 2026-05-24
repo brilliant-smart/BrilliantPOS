@@ -25,6 +25,7 @@ export interface Sale {
   sold_by: number;
   sold_by_name?: string;
   items?: SaleItem[];
+  items_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -47,19 +48,33 @@ export interface UpdateSaleData {
   sale_date?: string;
   customer_name?: string;
   customer_phone?: string;
+  contact_name?: string;
   sale_type?: 'cash' | 'credit' | 'online' | 'pos';
   payment_status?: 'unpaid' | 'partially_paid' | 'paid';
   notes?: string;
 }
 
+export interface PaginatedResponse<T> {
+  data: T[];
+  current_page: number;
+  last_page: number;
+  per_page: number;
+  total: number;
+  from: number;
+  to: number;
+}
+
 export const salesApi = {
-  // Get all sales
-  getAll: async (params?: { 
-    start_date?: string; 
-    end_date?: string; 
+  // Get all sales (paginated)
+  getAll: async (params?: {
+    start_date?: string;
+    end_date?: string;
     sale_type?: string;
     payment_status?: string;
     customer_name?: string;
+    search?: string;
+    page?: number;
+    per_page?: number;
   }) => {
     const queryParams = new URLSearchParams();
     if (params?.start_date) queryParams.append('start_date', params.start_date);
@@ -67,10 +82,13 @@ export const salesApi = {
     if (params?.sale_type) queryParams.append('sale_type', params.sale_type);
     if (params?.payment_status) queryParams.append('payment_status', params.payment_status);
     if (params?.customer_name) queryParams.append('customer_name', params.customer_name);
-    
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.page) queryParams.append('page', String(params.page));
+    if (params?.per_page) queryParams.append('per_page', String(params.per_page));
+
     const query = queryParams.toString();
     const response = await api.get(`/sales${query ? '?' + query : ''}`);
-    return response.data.data || response.data;
+    return response.data as PaginatedResponse<Sale>;
   },
 
   // Get single sale
@@ -132,11 +150,49 @@ export const salesApi = {
     if (startDate) params.append('start_date', startDate);
     if (endDate) params.append('end_date', endDate);
     params.append('format', format);
-    
+
     const query = params.toString();
     const response = await api.get(`/sales/export${query ? '?' + query : ''}`, {
       responseType: 'blob'
     });
+    return response.data;
+  },
+
+  // Generate short-lived receipt token
+  generateReceiptToken: async (saleId: number) => {
+    const response = await api.post(`/pos/sales/${saleId}/receipt-token`);
+    return response.data;
+  },
+
+  // Get credit summary (owner/manager only)
+  getCreditSummary: async () => {
+    const response = await api.get('/sales/credit-summary');
+    return response.data;
+  },
+
+  // Get overdue credit count for sidebar badge
+  getOverdueCount: async () => {
+    const response = await api.get('/sales/overdue-count');
+    return response.data as { count: number };
+  },
+
+  // Record payment with extended fields
+  recordPaymentExtended: async (saleId: number, data: {
+    amount: number;
+    method?: string;
+    reference?: string;
+    notes?: string;
+  }) => {
+    const response = await api.post(`/sales/${saleId}/payment`, data);
+    return response.data;
+  },
+
+  // Update contact info for a credit sale
+  updateContact: async (saleId: number, contactName?: string, customerPhone?: string) => {
+    const data: Record<string, string> = {};
+    if (contactName !== undefined) data.contact_name = contactName;
+    if (customerPhone !== undefined) data.customer_phone = customerPhone;
+    const response = await api.patch(`/sales/${saleId}/contact`, data);
     return response.data;
   },
 };

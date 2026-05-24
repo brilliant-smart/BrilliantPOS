@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { DatePicker } from '@/components/DatePicker';
+import { todayLocal } from '@/utils/date';
 import {
   Select,
   SelectContent,
@@ -43,7 +44,7 @@ export default function ExpenseCreate() {
     amount: 0,
     payment_method: 'cash',
     category_id: undefined,
-    expense_date: new Date().toISOString().split('T')[0],
+    expense_date: todayLocal(),
     vendor: '',
     receipt_number: '',
     notes: '',
@@ -87,11 +88,11 @@ export default function ExpenseCreate() {
     if (!formData.expense_date) {
       newErrors.expense_date = 'Expense date is required';
     } else {
-      const selectedDate = new Date(formData.expense_date);
+      // Compare YYYY-MM-DD strings directly to avoid timezone issues
       const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (selectedDate > today) {
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+      if (formData.expense_date > todayStr) {
         newErrors.expense_date = 'Expense date cannot be in the future';
       }
     }
@@ -137,7 +138,7 @@ export default function ExpenseCreate() {
           amount: 0,
           payment_method: 'cash',
           category_id: undefined,
-          expense_date: new Date().toISOString().split('T')[0],
+          expense_date: todayLocal(),
           vendor: '',
           receipt_number: '',
           notes: '',
@@ -289,8 +290,8 @@ export default function ExpenseCreate() {
                   Expense Date <span className="text-destructive">*</span>
                 </Label>
                 <DatePicker
-                  date={formData.expense_date ? new Date(formData.expense_date) : new Date()}
-                  onDateChange={(date) => handleChange('expense_date', date ? date.toISOString().split('T')[0] : '')}
+                  value={formData.expense_date}
+                  onChange={(value) => handleChange('expense_date', value)}
                   maxDate={new Date()}
                   className={errors.expense_date ? 'border-destructive' : ''}
                 />

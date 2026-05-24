@@ -45,6 +45,9 @@ class PurchaseOrderService
                 'discount_amount' => $data['discount_amount'] ?? 0,
                 'shipping_cost' => $data['shipping_cost'] ?? 0,
                 'total_amount' => $totalAmount,
+                'payment_method' => $data['payment_method'] ?? 'credit',
+                'payment_status' => 'unpaid',
+                'amount_paid' => 0,
                 'notes' => $data['notes'] ?? null,
             ]);
 
@@ -63,6 +66,8 @@ class PurchaseOrderService
                     'line_total' => $lineTotal,
                     'notes' => $item['notes'] ?? null,
                     'unit_type' => $item['unit_type'] ?? 'piece',
+                    'product_unit_type_id' => $item['product_unit_type_id'] ?? null,
+                    'conversion_factor' => $item['conversion_factor'] ?? 1,
                     'batch_number' => $item['batch_number'] ?? null,
                     'manufacturing_date' => $item['manufacturing_date'] ?? null,
                     'expiry_date' => $item['expiry_date'] ?? null,
@@ -227,31 +232,45 @@ class PurchaseOrderService
 
                 // Update product stock and cost
                 $product = Product::lockForUpdate()->findOrFail($itemData['product_id']);
-                
+
+                // Resolve conversion factor for base unit calculation
+                $conversionFactor = $poItem->conversion_factor ?? 1;
+                if ($poItem->product_unit_type_id) {
+                    $unitType = \App\Models\ProductUnitType::find($poItem->product_unit_type_id);
+                    if ($unitType) {
+                        $conversionFactor = (float) $unitType->conversion_factor;
+                    }
+                }
+
+                $quantityInBaseUnits = $quantityToReceive * $conversionFactor;
+
+                // Calculate per-piece cost from unit cost
+                $costPerPiece = (float) $poItem->unit_cost / $conversionFactor;
+
                 $previousStock = $product->stock_quantity;
-                $newStock = $previousStock + $quantityToReceive;
+                $newStock = $previousStock + $quantityInBaseUnits;
 
-                // Update average cost price (weighted average)
-                $totalValue = ($product->stock_quantity * $product->cost_price) + ($quantityToReceive * $poItem->unit_cost);
-                $newCostPrice = $newStock > 0 ? $totalValue / $newStock : $poItem->unit_cost;
+                // Update average cost price (weighted average) using per-piece cost
+                $totalValue = ($product->stock_quantity * $product->cost_price) + ($quantityInBaseUnits * $costPerPiece);
+                $newCostPrice = $newStock > 0 ? $totalValue / $newStock : $costPerPiece;
 
-                // Record price history if price changed
+                // Record price history if per-piece cost changed
                 $oldPrice = $product->last_purchase_price;
-                if ($oldPrice != $poItem->unit_cost) {
-                    $priceChange = $poItem->unit_cost - $oldPrice;
+                if (abs($oldPrice - $costPerPiece) > 0.001) {
+                    $priceChange = $costPerPiece - $oldPrice;
                     $percentageChange = $oldPrice > 0 ? (($priceChange / $oldPrice) * 100) : 0;
 
                     ProductPriceHistory::create([
                         'product_id' => $product->id,
                         'old_price' => $oldPrice,
-                        'new_price' => $poItem->unit_cost,
+                        'new_price' => $costPerPiece,
                         'price_change' => $priceChange,
                         'percentage_change' => $percentageChange,
                         'change_type' => 'purchase',
                         'supplier_name' => $po->supplier->name ?? null,
                         'reference_number' => $po->po_number,
                         'changed_by' => $user->id,
-                        'notes' => $priceChange > 0 
+                        'notes' => $priceChange > 0
                             ? "Price increased by ₦" . number_format(abs($priceChange), 2) . " (" . number_format(abs($percentageChange), 2) . "%)"
                             : "Price decreased by ₦" . number_format(abs($priceChange), 2) . " (" . number_format(abs($percentageChange), 2) . "%)",
                         'changed_at' => now(),
@@ -261,18 +280,18 @@ class PurchaseOrderService
                 $product->update([
                     'stock_quantity' => $newStock,
                     'cost_price' => $newCostPrice,
-                    'last_purchase_price' => $poItem->unit_cost,
+                    'last_purchase_price' => $costPerPiece,
                 ]);
 
-                // Create stock movement
+                // Create stock movement (in base units)
                 StockMovement::create([
                     'product_id' => $product->id,
                     'user_id' => $user->id,
                     'type' => 'purchase',
-                    'quantity' => $quantityToReceive,
+                    'quantity' => $quantityInBaseUnits,
                     'previous_stock' => $previousStock,
                     'new_stock' => $newStock,
-                    'unit_cost' => $poItem->unit_cost,
+                    'unit_cost' => $costPerPiece,
                     'notes' => "Received from PO: {$po->po_number}",
                 ]);
 
@@ -301,7 +320,7 @@ class PurchaseOrderService
     }
 
     /**
-     * Record payment
+     * Record payment (with transaction and row locking for concurrency safety)
      */
     public function recordPayment(PurchaseOrder $po, float $amount, $user): PurchaseOrder
     {
@@ -309,29 +328,35 @@ class PurchaseOrderService
             throw new \Exception('Payment amount must be greater than zero');
         }
 
-        $newAmountPaid = $po->amount_paid + $amount;
+        return DB::transaction(function () use ($po, $amount, $user) {
+            // Lock the PO row to prevent concurrent payment race conditions
+            $lockedPo = PurchaseOrder::lockForUpdate()->findOrFail($po->id);
 
-        if ($newAmountPaid > $po->total_amount) {
-            throw new \Exception('Payment amount exceeds total due');
-        }
+            $newAmountPaid = round((float) $lockedPo->amount_paid + $amount, 2);
+            $totalAmount = round((float) $lockedPo->total_amount, 2);
 
-        $paymentStatus = 'partially_paid';
-        if ($newAmountPaid >= $po->total_amount) {
-            $paymentStatus = 'paid';
-        }
+            if (bccomp((string) $newAmountPaid, (string) $totalAmount, 2) > 0) {
+                throw new \Exception('Payment amount exceeds total due');
+            }
 
-        $po->update([
-            'amount_paid' => $newAmountPaid,
-            'payment_status' => $paymentStatus,
-        ]);
+            $paymentStatus = 'partially_paid';
+            if (bccomp((string) $newAmountPaid, (string) $totalAmount, 2) >= 0) {
+                $paymentStatus = 'paid';
+            }
 
-        Log::info('Payment recorded for PO', [
-            'po_number' => $po->po_number,
-            'amount' => $amount,
-            'new_total_paid' => $newAmountPaid,
-            'user_id' => $user->id,
-        ]);
+            $lockedPo->update([
+                'amount_paid' => $newAmountPaid,
+                'payment_status' => $paymentStatus,
+            ]);
 
-        return $po;
+            Log::info('Payment recorded for PO', [
+                'po_number' => $lockedPo->po_number,
+                'amount' => $amount,
+                'new_total_paid' => $newAmountPaid,
+                'user_id' => $user->id,
+            ]);
+
+            return $lockedPo;
+        });
     }
 }

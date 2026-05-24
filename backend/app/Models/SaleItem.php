@@ -13,8 +13,10 @@ class SaleItem extends Model
     protected $fillable = [
         'sale_id',
         'product_id',
+        'product_unit_type_id',
         'quantity',
         'unit_type',
+        'conversion_factor',
         'unit_price',
         'unit_cost',
         'discount_percent',
@@ -25,7 +27,9 @@ class SaleItem extends Model
     ];
 
     protected $casts = [
+        'product_unit_type_id' => 'integer',
         'quantity' => 'integer',
+        'conversion_factor' => 'decimal:2',
         'unit_price' => 'decimal:2',
         'unit_cost' => 'decimal:2',
         'discount_percent' => 'decimal:2',
@@ -45,6 +49,11 @@ class SaleItem extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function unitType(): BelongsTo
+    {
+        return $this->belongsTo(ProductUnitType::class, 'product_unit_type_id');
     }
 
     /**

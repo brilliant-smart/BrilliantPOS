@@ -12,9 +12,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { purchaseOrderApi } from '@/app/api/purchaseOrders';
 import { PurchaseOrder } from '@/types/ims';
 import { toast } from 'sonner';
-import Swal from 'sweetalert2';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { MonthYearPicker } from '@/components/MonthYearPicker';
 import { DatePicker } from '@/components/DatePicker';
+import { todayLocal, parseLocalDate } from '@/utils/date';
 import { useAuth } from '@/app/auth/AuthContext';
 
 export default function PurchaseOrderDetail() {
@@ -27,10 +38,18 @@ export default function PurchaseOrderDetail() {
   const [paymentData, setPaymentData] = useState({
     amount: '',
     payment_method: 'bank_transfer' as 'cash' | 'bank_transfer' | 'cheque' | 'card' | 'credit',
-    payment_date: new Date().toISOString().split('T')[0],
+    payment_date: todayLocal(),
     reference: '',
   });
   const [formattedAmount, setFormattedAmount] = useState('');
+
+  // AlertDialog states
+  const [showApproveConfirm, setShowApproveConfirm] = useState(false);
+  const [showPaymentRequired, setShowPaymentRequired] = useState(false);
+  const [showReceiveConfirm, setShowReceiveConfirm] = useState(false);
+  const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
   useEffect(() => {
     if (id) loadOrder();
@@ -47,23 +66,12 @@ export default function PurchaseOrderDetail() {
     }
   };
 
-  const handleApprove = async () => {
-    // Small delay to ensure any previous dialogs are closed
-    await new Promise(resolve => setTimeout(resolve, 100));
+  const handleApprove = () => {
+    setShowApproveConfirm(true);
+  };
 
-    const result = await Swal.fire({
-      title: 'Approve Purchase Order?',
-      text: `PO: ${order?.po_number} - Total: ₦${order?.total_amount?.toLocaleString()}`,
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonColor: '#22c55e',
-      cancelButtonColor: '#6b7280',
-      confirmButtonText: 'Yes, Approve',
-      cancelButtonText: 'Cancel'
-    });
-
-    if (!result.isConfirmed) return;
-
+  const confirmApprove = async () => {
+    setShowApproveConfirm(false);
     try {
       await purchaseOrderApi.approve(parseInt(id!));
       toast.success('Purchase order approved');
@@ -93,7 +101,7 @@ export default function PurchaseOrderDetail() {
     setPaymentData({
       amount: balance.toString(),
       payment_method: defaultPaymentMethod as any,
-      payment_date: new Date().toISOString().split('T')[0],
+      payment_date: todayLocal(),
       reference: '',
     });
     setFormattedAmount(balance.toLocaleString());
@@ -107,37 +115,16 @@ export default function PurchaseOrderDetail() {
   const [showReceiveDialog, setShowReceiveDialog] = useState(false);
   const [receivingItems, setReceivingItems] = useState<any[]>([]);
 
-  const handleReceiveClick = async () => {
+  const handleReceiveClick = () => {
     const isPaid = order?.payment_status === 'paid' || order?.payment_status === 'partially_paid';
     const isCreditPurchase = ['credit', 'credit_7', 'credit_14', 'credit_30', 'credit_60'].includes(order?.payment_method || '');
-    
+
     // Only enforce payment for non-credit purchases
     if (!isCreditPurchase && !isPaid) {
-      // Small delay for any previous dialogs
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      const result = await Swal.fire({
-        title: 'Payment Required',
-        html: `
-          <p><strong>Payment must be recorded before receiving goods for cash/immediate purchases.</strong></p>
-          <p class="text-sm text-muted-foreground mt-2">This ensures proper financial tracking.</p>
-          <p class="text-sm text-muted-foreground mt-2">Total Amount: <strong>₦${order?.total_amount?.toLocaleString()}</strong></p>
-          <p class="text-sm mt-3">Would you like to record payment now?</p>
-        `,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#22c55e',
-        cancelButtonColor: '#6b7280',
-        confirmButtonText: '₦ Record Payment',
-        cancelButtonText: 'Cancel'
-      });
-      
-      if (result.isConfirmed) {
-        handlePaymentDialogOpen();
-      }
+      setShowPaymentRequired(true);
       return;
     }
-    
+
     // Initialize receiving quantities with batch/expiry tracking
     const items = order?.items?.map(item => ({
       id: item.id,
@@ -157,10 +144,15 @@ export default function PurchaseOrderDetail() {
     setShowReceiveDialog(true);
   };
 
+  const handlePaymentRequiredAction = () => {
+    setShowPaymentRequired(false);
+    handlePaymentDialogOpen();
+  };
+
   const handleConfirmReceive = async () => {
     // Validate quantities
     const hasInvalidQuantity = receivingItems.some(
-      item => item.quantity_to_receive < 0 || 
+      item => item.quantity_to_receive < 0 ||
       item.quantity_to_receive > (item.quantity_ordered - item.quantity_already_received)
     );
 
@@ -170,7 +162,7 @@ export default function PurchaseOrderDetail() {
     }
 
     const itemsToReceive = receivingItems.filter(item => item.quantity_to_receive > 0);
-    
+
     if (itemsToReceive.length === 0) {
       toast.error('Please specify quantities to receive');
       return;
@@ -179,7 +171,7 @@ export default function PurchaseOrderDetail() {
     // Validate batch/expiry requirements
     for (let i = 0; i < itemsToReceive.length; i++) {
       const item = itemsToReceive[i];
-      
+
       // Check if batch number is required
       if (item.track_batch && !item.batch_number) {
         toast.error(`Batch number is required for "${item.product_name}"`);
@@ -197,7 +189,7 @@ export default function PurchaseOrderDetail() {
         const expiryDate = new Date(item.expiry_date);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         if (expiryDate < today) {
           toast.error(`Expiry date must be in the future for "${item.product_name}"`);
           return;
@@ -208,7 +200,7 @@ export default function PurchaseOrderDetail() {
       if (item.manufacturing_date && item.expiry_date) {
         const mfgDate = new Date(item.manufacturing_date);
         const expDate = new Date(item.expiry_date);
-        
+
         if (mfgDate >= expDate) {
           toast.error(`Manufacturing date must be before expiry date for "${item.product_name}"`);
           return;
@@ -216,31 +208,15 @@ export default function PurchaseOrderDetail() {
       }
     }
 
-    // CRITICAL FIX: Close the dialog FIRST to prevent z-index conflicts
+    // Show confirmation dialog
+    setShowReceiveConfirm(true);
+  };
+
+  const confirmReceive = async () => {
+    setShowReceiveConfirm(false);
     setShowReceiveDialog(false);
 
-    // Small delay to ensure dialog is fully closed before showing SweetAlert
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    const result = await Swal.fire({
-      title: 'Confirm Goods Receipt',
-      html: `
-        <p>Receive <strong>${itemsToReceive.length} item(s)</strong> and update inventory?</p>
-        <p class="text-sm text-muted-foreground mt-2">This action will increase your stock levels.</p>
-      `,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#3b82f6',
-      cancelButtonColor: '#6b7280',
-      confirmButtonText: 'Yes, Update Inventory',
-      cancelButtonText: 'Cancel'
-    });
-
-    if (!result.isConfirmed) {
-      // Re-open dialog if user cancels
-      setShowReceiveDialog(true);
-      return;
-    }
+    const itemsToReceive = receivingItems.filter(item => item.quantity_to_receive > 0);
 
     try {
       const payload = {
@@ -252,7 +228,7 @@ export default function PurchaseOrderDetail() {
           expiry_date: item.expiry_date || null,
         }))
       };
-      
+
       await purchaseOrderApi.receive(parseInt(id!), payload);
       toast.success('Goods received and inventory updated successfully!');
       loadOrder();
@@ -261,6 +237,11 @@ export default function PurchaseOrderDetail() {
       // Re-open dialog on error so user can try again
       setShowReceiveDialog(true);
     }
+  };
+
+  const cancelReceive = () => {
+    setShowReceiveConfirm(false);
+    // Keep receive dialog open
   };
 
   const updateReceivingQuantity = (index: number, value: number) => {
@@ -277,50 +258,30 @@ export default function PurchaseOrderDetail() {
 
   const handleExportPDF = async () => {
     try {
-      // Get the auth token
-      const token = localStorage.getItem('brilliant_auth_token');
-      
-      // Open PDF in new window
-      const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const url = `${backendUrl}/admin/purchase-orders/${id}/pdf?token=${token}`;
-      
-      window.open(url, '_blank');
-    } catch (error: any) {
+      // Generate a short-lived PDF token via the API client (handles base URL and auth)
+      const response = await purchaseOrderApi.generatePdfToken(Number(id));
+      // PDF download URL uses the backend origin directly (web route, not /api)
+      const backendOrigin = window.location.port === '5173' || window.location.port === '8080'
+        ? 'http://localhost:8000'
+        : window.location.origin;
+      window.open(`${backendOrigin}/purchase-orders/${response.token}/pdf`, '_blank');
+    } catch {
       toast.error('Failed to open PDF');
     }
   };
 
-  const handleRecordPayment = async () => {
+  const handleRecordPayment = () => {
     if (!paymentData.amount || parseFloat(paymentData.amount) <= 0) {
       toast.error('Please enter a valid payment amount');
       return;
     }
 
-    // Close the payment dialog first to avoid conflicts with SweetAlert
+    setShowPaymentConfirm(true);
+  };
+
+  const confirmRecordPayment = async () => {
+    setShowPaymentConfirm(false);
     setShowPaymentDialog(false);
-
-    // Small delay to ensure dialog is fully closed
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    const result = await Swal.fire({
-      title: 'Confirm Payment',
-      html: `
-        <p>Record payment of <strong>₦${parseFloat(paymentData.amount).toLocaleString()}</strong>?</p>
-        <p class="text-sm text-muted-foreground mt-2">Method: ${paymentData.payment_method.replace('_', ' ').toUpperCase()}</p>
-      `,
-      icon: 'info',
-      showCancelButton: true,
-      confirmButtonColor: '#22c55e',
-      cancelButtonColor: '#6b7280',
-      confirmButtonText: '₦ Confirm Payment',
-      cancelButtonText: 'Cancel'
-    });
-
-    if (!result.isConfirmed) {
-      // Re-open dialog if user cancels
-      setShowPaymentDialog(true);
-      return;
-    }
 
     try {
       await purchaseOrderApi.recordPayment(parseInt(id!), {
@@ -333,7 +294,7 @@ export default function PurchaseOrderDetail() {
       setPaymentData({
         amount: '',
         payment_method: 'bank_transfer',
-        payment_date: new Date().toISOString().split('T')[0],
+        payment_date: todayLocal(),
         reference: '',
       });
       loadOrder();
@@ -344,36 +305,25 @@ export default function PurchaseOrderDetail() {
     }
   };
 
-  const handleCancelPO = async () => {
-    // Small delay to ensure any previous dialogs are closed
-    await new Promise(resolve => setTimeout(resolve, 100));
+  const cancelRecordPayment = () => {
+    setShowPaymentConfirm(false);
+    // Keep payment dialog open
+  };
 
-    const result = await Swal.fire({
-      title: 'Cancel Purchase Order?',
-      html: `
-        <p>Enter cancellation reason:</p>
-        <textarea id="swal-input-reason" class="swal2-input" style="height: 80px; width: 90%;" placeholder="Why are you cancelling this PO?"></textarea>
-      `,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#6b7280',
-      confirmButtonText: 'Yes, Cancel PO',
-      cancelButtonText: 'Keep PO',
-      preConfirm: () => {
-        const reason = (document.getElementById('swal-input-reason') as HTMLTextAreaElement)?.value;
-        if (!reason || reason.trim().length < 5) {
-          Swal.showValidationMessage('Please provide a reason (at least 5 characters)');
-          return false;
-        }
-        return reason;
-      }
-    });
+  const handleCancelPO = () => {
+    setCancelReason('');
+    setShowCancelConfirm(true);
+  };
 
-    if (!result.isConfirmed || !result.value) return;
+  const confirmCancelPO = async () => {
+    if (!cancelReason || cancelReason.trim().length < 5) {
+      toast.error('Please provide a reason (at least 5 characters)');
+      return;
+    }
 
+    setShowCancelConfirm(false);
     try {
-      await purchaseOrderApi.cancel(parseInt(id!), { cancellation_reason: result.value });
+      await purchaseOrderApi.cancel(parseInt(id!), { cancellation_reason: cancelReason });
       toast.success('Purchase order cancelled successfully');
       loadOrder();
     } catch (error: any) {
@@ -469,7 +419,7 @@ export default function PurchaseOrderDetail() {
   const isOwnerOrManager = user?.role === 'owner' || user?.role === 'manager';
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="ghost" size="icon" onClick={() => navigate('/admin/purchase-orders')}>
@@ -477,7 +427,7 @@ export default function PurchaseOrderDetail() {
           </Button>
           <div>
             <h1 className="text-3xl font-bold">{order.po_number}</h1>
-            <p className="text-muted-foreground">Purchase Order Details</p>
+            <p className="text-muted-foreground dark:text-muted-foreground/80">Purchase Order Details</p>
           </div>
         </div>
         <div className="flex items-center space-x-2">
@@ -535,39 +485,39 @@ export default function PurchaseOrderDetail() {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Status:</span>
+              <span className="text-muted-foreground dark:text-muted-foreground/80">Status:</span>
               {statusInfo.badge}
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Supplier:</span>
+              <span className="text-muted-foreground dark:text-muted-foreground/80">Supplier:</span>
               <span className="font-medium">{order.supplier?.name}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Order Date:</span>
-              <span>{new Date(order.order_date).toLocaleDateString()}</span>
+              <span className="text-muted-foreground dark:text-muted-foreground/80">Order Date:</span>
+              <span>{parseLocalDate(order.order_date).toLocaleDateString()}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Payment Status:</span>
+              <span className="text-muted-foreground dark:text-muted-foreground/80">Payment Status:</span>
               <Badge>{order.payment_status?.toUpperCase() || 'UNPAID'}</Badge>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Payment Method:</span>
+              <span className="text-muted-foreground dark:text-muted-foreground/80">Payment Method:</span>
               <span className="font-medium">{order.payment_method?.replace('_', ' ').toUpperCase() || 'CREDIT'}</span>
             </div>
             {order.payment_due_date && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Payment Due:</span>
+                <span className="text-muted-foreground dark:text-muted-foreground/80">Payment Due:</span>
                 <span className={`font-medium ${
-                  new Date(order.payment_due_date) < new Date() && order.payment_status !== 'paid'
+                  parseLocalDate(order.payment_due_date) < new Date() && order.payment_status !== 'paid'
                     ? 'text-red-600 dark:text-red-400 font-bold'
-                    : new Date(order.payment_due_date).getTime() - new Date().getTime() < 3 * 24 * 60 * 60 * 1000
+                    : parseLocalDate(order.payment_due_date).getTime() - new Date().getTime() < 3 * 24 * 60 * 60 * 1000
                     ? 'text-orange-600 dark:text-orange-400 font-bold'
                     : ''
                 }`}>
-                  {new Date(order.payment_due_date).toLocaleDateString()}
-                  {new Date(order.payment_due_date) < new Date() && order.payment_status !== 'paid' && ' ⚠️ OVERDUE'}
-                  {new Date(order.payment_due_date).getTime() - new Date().getTime() < 3 * 24 * 60 * 60 * 1000 && 
-                   new Date(order.payment_due_date) >= new Date() && 
+                  {parseLocalDate(order.payment_due_date).toLocaleDateString()}
+                  {parseLocalDate(order.payment_due_date) < new Date() && order.payment_status !== 'paid' && ' ⚠️ OVERDUE'}
+                  {parseLocalDate(order.payment_due_date).getTime() - new Date().getTime() < 3 * 24 * 60 * 60 * 1000 &&
+                   parseLocalDate(order.payment_due_date) >= new Date() && 
                    order.payment_status !== 'paid' && ' ⏰ DUE SOON'}
                 </span>
               </div>
@@ -598,7 +548,7 @@ export default function PurchaseOrderDetail() {
               <div key={index} className="flex justify-between items-center border-b pb-2">
                 <div>
                   <p className="font-medium">{item.product?.name || `Product #${item.product_id}`}</p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                     Qty: {item.quantity_received || 0}/{item.quantity_ordered} @ ₦{parseFloat(item.unit_cost || 0).toLocaleString()}
                   </p>
                 </div>
@@ -622,7 +572,7 @@ export default function PurchaseOrderDetail() {
         </p>
         
         <div className="space-y-4 py-4">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
             Verify and confirm the quantities received. This will update your inventory.
           </p>
           
@@ -635,7 +585,7 @@ export default function PurchaseOrderDetail() {
                     <div className="grid gap-4 md:grid-cols-4">
                       <div className="md:col-span-2">
                         <Label className="text-sm font-medium">{item.product_name}</Label>
-                        <p className="text-xs text-muted-foreground mt-1">
+                        <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                           Ordered: {item.quantity_ordered} | Already Received: {item.quantity_already_received}
                         </p>
                         {(item.track_batch || item.track_expiry) && (
@@ -669,7 +619,7 @@ export default function PurchaseOrderDetail() {
                     <div className="grid grid-cols-3 gap-4 pt-3 border-t">
                       <div className="space-y-2">
                         <Label className="flex items-center gap-2">
-                          <Package className="h-3.5 w-3.5 text-muted-foreground" />
+                          <Package className="h-3.5 w-3.5 text-muted-foreground dark:text-muted-foreground/80" />
                           Batch Number {item.track_batch && <span className="text-red-500 dark:text-red-400">*</span>}
                         </Label>
                         <Input
@@ -680,7 +630,7 @@ export default function PurchaseOrderDetail() {
                           className={item.track_batch ? 'border-blue-300 dark:border-blue-800' : ''}
                         />
                         {item.track_batch && (
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                             ⚠️ Required for this product
                           </p>
                         )}
@@ -688,7 +638,7 @@ export default function PurchaseOrderDetail() {
 
                       <div className="space-y-2">
                         <Label className="flex items-center gap-2">
-                          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                          <Calendar className="h-3.5 w-3.5 text-muted-foreground dark:text-muted-foreground/80" />
                           Manufacturing Date (Optional)
                         </Label>
                         <MonthYearPicker
@@ -712,7 +662,7 @@ export default function PurchaseOrderDetail() {
                           className={item.track_expiry ? 'border-orange-300 dark:border-orange-800' : ''}
                         />
                         {item.track_expiry && (
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                             ⚠️ Required for this product
                           </p>
                         )}
@@ -767,7 +717,7 @@ export default function PurchaseOrderDetail() {
                 onChange={(e) => handleAmountChange(e.target.value)}
                 className={isAmountMatching ? 'border-green-500 dark:border-green-700 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 font-bold' : ''}
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                 Total: ₦{order?.total_amount?.toLocaleString()} | 
                 Paid: ₦{(order?.amount_paid || 0).toLocaleString()} | 
                 Balance: ₦{((order?.total_amount || 0) - (order?.amount_paid || 0)).toLocaleString()}
@@ -795,7 +745,7 @@ export default function PurchaseOrderDetail() {
                 </SelectContent>
               </Select>
               {order?.payment_method && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                   PO Payment Method: {order.payment_method.replace('_', ' ').toUpperCase()}
                 </p>
               )}
@@ -831,6 +781,117 @@ export default function PurchaseOrderDetail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Approve Confirmation */}
+      <AlertDialog open={showApproveConfirm} onOpenChange={setShowApproveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Approve Purchase Order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              PO: {order?.po_number} - Total: ₦{order?.total_amount?.toLocaleString()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmApprove} className="bg-green-600 hover:bg-green-700">
+              Yes, Approve
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Payment Required Warning */}
+      <AlertDialog open={showPaymentRequired} onOpenChange={setShowPaymentRequired}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Payment Required</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p><strong>Payment must be recorded before receiving goods for cash/immediate purchases.</strong></p>
+                <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">This ensures proper financial tracking.</p>
+                <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">Total Amount: <strong>₦{order?.total_amount?.toLocaleString()}</strong></p>
+                <p className="text-sm mt-3">Would you like to record payment now?</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePaymentRequiredAction} className="bg-green-600 hover:bg-green-700">
+              Record Payment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm Goods Receipt */}
+      <AlertDialog open={showReceiveConfirm} onOpenChange={(open) => { if (!open) cancelReceive(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Goods Receipt</AlertDialogTitle>
+            <AlertDialogDescription>
+              Receive <strong>{receivingItems.filter(item => item.quantity_to_receive > 0).length} item(s)</strong> and update inventory?
+              This action will increase your stock levels.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelReceive}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmReceive} className="bg-blue-600 hover:bg-blue-700">
+              Yes, Update Inventory
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm Payment */}
+      <AlertDialog open={showPaymentConfirm} onOpenChange={(open) => { if (!open) cancelRecordPayment(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Payment</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>Record payment of <strong>₦{parseFloat(paymentData.amount || '0').toLocaleString()}</strong>?</p>
+                <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 mt-2">Method: {paymentData.payment_method.replace('_', ' ').toUpperCase()}</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelRecordPayment}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRecordPayment} className="bg-green-600 hover:bg-green-700">
+              Confirm Payment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Cancel PO */}
+      <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel Purchase Order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Enter a cancellation reason. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-6">
+            <Textarea
+              placeholder="Why are you cancelling this PO? (minimum 5 characters)"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep PO</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmCancelPO}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={!cancelReason || cancelReason.trim().length < 5}
+            >
+              Cancel PO
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -6,28 +6,33 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { DataPagination } from '@/components/DataPagination';
 import { purchaseOrderApi } from '@/app/api/purchaseOrders';
 import { PurchaseOrder } from '@/types/ims';
+import { parseLocalDate } from '@/utils/date';
 import { toast } from 'sonner';
+
+const PER_PAGE = 15;
 
 export default function PurchaseOrderList() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
 
   useEffect(() => {
-    loadOrders();
+    loadOrders(1);
   }, []);
 
-  const loadOrders = async () => {
+  const loadOrders = async (page: number = 1) => {
     try {
-      const data = await purchaseOrderApi.getAll();
-      // Sort by created_at or order_date descending (latest first)
-      const sortedData = data.sort((a, b) => {
-        const dateA = new Date(a.created_at || a.order_date).getTime();
-        const dateB = new Date(b.created_at || b.order_date).getTime();
-        return dateB - dateA; // Latest first
-      });
-      setOrders(sortedData);
+      setLoading(true);
+      const result = await purchaseOrderApi.getAll({ page, per_page: PER_PAGE });
+      setOrders(result.data);
+      setCurrentPage(result.current_page);
+      setTotalPages(result.last_page);
+      setTotalRecords(result.total);
     } catch (error: any) {
       toast.error(error.message || 'Failed to load purchase orders');
     } finally {
@@ -119,23 +124,23 @@ export default function PurchaseOrderList() {
     !['cancelled', 'draft'].includes(o.status)
   );
   
-  const overduePOs = unpaidPOs.filter(o => 
-    o.payment_due_date && 
-    new Date(o.payment_due_date) < new Date()
+  const overduePOs = unpaidPOs.filter(o =>
+    o.payment_due_date &&
+    parseLocalDate(o.payment_due_date) < new Date()
   );
-  
-  const dueSoonPOs = unpaidPOs.filter(o => 
-    o.payment_due_date && 
-    new Date(o.payment_due_date) >= new Date() &&
-    new Date(o.payment_due_date).getTime() - new Date().getTime() < 3 * 24 * 60 * 60 * 1000
+
+  const dueSoonPOs = unpaidPOs.filter(o =>
+    o.payment_due_date &&
+    parseLocalDate(o.payment_due_date) >= new Date() &&
+    parseLocalDate(o.payment_due_date).getTime() - new Date().getTime() < 3 * 24 * 60 * 60 * 1000
   );
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Purchase Orders</h1>
-          <p className="text-muted-foreground">Manage purchase orders and stock receiving</p>
+          <p className="text-muted-foreground dark:text-muted-foreground/80">Manage purchase orders and stock receiving</p>
         </div>
         <div className="flex items-center space-x-2">
           <Button onClick={handleExportAll} variant="outline">
@@ -171,7 +176,7 @@ export default function PurchaseOrderList() {
                 Total: <strong className="text-orange-700 dark:text-orange-400">₦{dueSoonPOs.reduce((sum, o) => sum + (o.total_amount - (o.amount_paid || 0)), 0).toLocaleString()}</strong>
               </p>
             )}
-            <p className="text-xs mt-2 text-muted-foreground">Click on the PO to record payment.</p>
+            <p className="text-xs mt-2 text-muted-foreground dark:text-muted-foreground/80">Click on the PO to record payment.</p>
           </AlertDescription>
         </Alert>
       )}
@@ -179,13 +184,13 @@ export default function PurchaseOrderList() {
       {loading ? (
         <Card>
           <CardContent className="p-4 md:p-6">
-            <p className="text-center text-muted-foreground">Loading purchase orders...</p>
+            <p className="text-center text-muted-foreground dark:text-muted-foreground/80">Loading purchase orders...</p>
           </CardContent>
         </Card>
       ) : orders.length === 0 ? (
         <Card>
           <CardContent className="p-4 md:p-6">
-            <p className="text-center text-muted-foreground">No purchase orders yet. Create your first one!</p>
+            <p className="text-center text-muted-foreground dark:text-muted-foreground/80">No purchase orders yet. Create your first one!</p>
           </CardContent>
         </Card>
       ) : (
@@ -194,8 +199,8 @@ export default function PurchaseOrderList() {
             const statusInfo = getEnhancedStatusInfo(order);
             
             return (
-              <Link key={order.id} to={`/admin/purchase-orders/${order.id}`}>
-                <Card className="hover:shadow-md transition-shadow cursor-pointer">
+              <Link key={order.id} to={`/admin/purchase-orders/${order.id}`} className="block">
+                <Card className="hover:shadow-md transition-shadow cursor-pointer mb-4">
                   <CardContent className="p-4 md:p-6">
                     <div className="space-y-4">
                       {/* Header Row */}
@@ -205,16 +210,16 @@ export default function PurchaseOrderList() {
                             <h3 className="text-lg font-semibold">{order.po_number}</h3>
                             {statusInfo.badge}
                           </div>
-                          <p className="text-sm text-muted-foreground">
+                          <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                             Supplier: {order.supplier?.name || 'N/A'}
                           </p>
-                          <p className="text-sm text-muted-foreground">
-                            Order Date: {new Date(order.order_date).toLocaleDateString()}
+                          <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
+                            Order Date: {parseLocalDate(order.order_date).toLocaleDateString()}
                           </p>
                         </div>
                         <div className="text-right">
                           <p className="text-2xl font-bold">₦{parseFloat(order.total_amount).toLocaleString()}</p>
-                          <p className="text-sm text-muted-foreground mt-1">
+                          <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 mt-1">
                             Payment: {order.payment_status?.toUpperCase() || 'UNPAID'}
                           </p>
                         </div>
@@ -223,11 +228,11 @@ export default function PurchaseOrderList() {
                       {/* Progress Bar */}
                       <div className="space-y-2">
                         <div className="flex justify-between items-center text-sm">
-                          <span className="text-muted-foreground font-medium">{statusInfo.nextAction}</span>
-                          <span className="text-muted-foreground">{statusInfo.progress}%</span>
+                          <span className="text-muted-foreground dark:text-muted-foreground/80 font-medium">{statusInfo.nextAction}</span>
+                          <span className="text-muted-foreground dark:text-muted-foreground/80">{statusInfo.progress}%</span>
                         </div>
                         <Progress value={statusInfo.progress} className="h-2" />
-                        <div className="flex justify-between text-xs text-muted-foreground">
+                        <div className="flex justify-between text-xs text-muted-foreground dark:text-muted-foreground/80">
                           <span>📝 Draft</span>
                           <span>✅ Approved</span>
                           <span>💰 Paid</span>
@@ -242,6 +247,14 @@ export default function PurchaseOrderList() {
           })}
         </div>
       )}
+
+      <DataPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalRecords={totalRecords}
+        perPage={PER_PAGE}
+        onPageChange={(page) => loadOrders(page)}
+      />
     </div>
   );
 }

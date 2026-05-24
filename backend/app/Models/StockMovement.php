@@ -16,6 +16,8 @@ class StockMovement extends Model
         'new_stock',
         'notes',
         'unit_cost',
+        'reference_type',
+        'reference_id',
     ];
 
     protected function casts(): array

@@ -33,6 +33,7 @@ import {
 import { fetchExpenses, deleteExpense, fetchExpenseCategories, fetchExpenseAnalytics, type Expense, type ExpenseCategory } from '@/app/api/expenses';
 import { useToast } from '@/hooks/use-toast';
 import { Banknote, Building2, CreditCard, User, Store, MoreHorizontal } from 'lucide-react';
+import { DataPagination } from '@/components/DataPagination';
 
 const PAYMENT_METHOD_ICONS: Record<string, JSX.Element> = {
   cash: <Banknote className="h-4 w-4" />,
@@ -189,7 +190,7 @@ export default function ExpenseList() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Expenses</h1>
-          <p className="text-muted-foreground">Track and manage shop operational expenses</p>
+          <p className="text-muted-foreground dark:text-muted-foreground/80">Track and manage shop operational expenses</p>
         </div>
         <Link to="/admin/expenses/create">
           <Button className="gap-2">
@@ -245,7 +246,7 @@ export default function ExpenseList() {
             <div>
               <label className="text-sm font-medium mb-2 block">Search</label>
               <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                 <Input
                   placeholder="Search expenses..."
                   value={search}
@@ -355,12 +356,12 @@ export default function ExpenseList() {
         <CardContent>
           {loading ? (
             <div className="text-center py-12">
-              <p className="text-muted-foreground">Loading expenses...</p>
+              <p className="text-muted-foreground dark:text-muted-foreground/80">Loading expenses...</p>
             </div>
           ) : expenses.length === 0 ? (
             <div className="text-center py-12">
-              <Receipt className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground mb-4">No expenses found</p>
+              <Receipt className="h-12 w-12 mx-auto text-muted-foreground dark:text-muted-foreground/80 mb-4" />
+              <p className="text-muted-foreground dark:text-muted-foreground/80 mb-4">No expenses found</p>
               <Link to="/admin/expenses/create">
                 <Button variant="outline">
                   <Plus className="h-4 w-4 mr-2" />
@@ -398,7 +399,7 @@ export default function ExpenseList() {
                           <div className="max-w-[200px]">
                             <div className="font-medium truncate">{expense.title}</div>
                             {expense.description && (
-                              <div className="text-sm text-muted-foreground truncate">
+                              <div className="text-sm text-muted-foreground dark:text-muted-foreground/80 truncate">
                                 {expense.description}
                               </div>
                             )}
@@ -460,31 +461,13 @@ export default function ExpenseList() {
               </div>
 
               {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between mt-4">
-                  <div className="text-sm text-muted-foreground">
-                    Page {currentPage} of {totalPages}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(currentPage - 1)}
-                      disabled={currentPage === 1}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(currentPage + 1)}
-                      disabled={currentPage === totalPages}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <DataPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalRecords={total}
+                perPage={15}
+                onPageChange={setCurrentPage}
+              />
             </>
           )}
         </CardContent>

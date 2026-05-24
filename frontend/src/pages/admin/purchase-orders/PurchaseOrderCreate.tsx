@@ -12,14 +12,27 @@ import { purchaseOrderApi } from '@/app/api/purchaseOrders';
 import { supplierApi } from '@/app/api/suppliers';
 import { productApi } from '@/app/api/products';
 import { priceHistoryApi } from '@/app/api/priceHistory';
-import { Supplier } from '@/types/ims';
+import { Supplier, ProductUnitType } from '@/types/ims';
 import { toast } from 'sonner';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import { MonthYearPicker } from '@/components/MonthYearPicker';
 import { DatePicker } from '@/components/DatePicker';
 import PriceComparisonModal from '@/components/PriceComparisonModal';
 import { createBarcodeScanner } from '@/utils/barcodeScanner';
+import { todayLocal } from '@/utils/date';
 import { ProductSearchSelect } from '@/components/ProductSearchSelect';
+
+interface POLineItem {
+  product_id: string;
+  quantity_ordered: number;
+  unit_type: string;
+  product_unit_type_id: number | null;
+  conversion_factor: number;
+  unit_cost: number;
+  batch_number: string;
+  expiry_date: string;
+  manufacturing_date: string;
+}
 
 export default function PurchaseOrderCreate() {
   const navigate = useNavigate();
@@ -31,21 +44,23 @@ export default function PurchaseOrderCreate() {
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [formData, setFormData] = useState({
     supplier_id: '',
-    order_date: new Date().toISOString().split('T')[0],
+    order_date: todayLocal(),
     expected_delivery_date: '',
     payment_method: 'credit' as 'cash' | 'bank_transfer' | 'cheque' | 'card' | 'credit',
     payment_due_date: '',
     notes: '',
   });
-  const [items, setItems] = useState<any[]>([
-    { 
-      product_id: '', 
-      quantity_ordered: 1, 
-      unit_cost: 0, 
+  const [items, setItems] = useState<POLineItem[]>([
+    {
+      product_id: '',
+      quantity_ordered: 1,
       unit_type: 'piece',
+      product_unit_type_id: null,
+      conversion_factor: 1,
+      unit_cost: 0,
       batch_number: '',
       expiry_date: '',
-      manufacturing_date: ''
+      manufacturing_date: '',
     },
   ]);
   const [showScanner, setShowScanner] = useState(false);
@@ -64,33 +79,46 @@ export default function PurchaseOrderCreate() {
         onScan: async (barcode) => {
           try {
             const product = await productApi.searchByBarcode(barcode);
-            
+
+            // Check if the barcode matches a unit type barcode
+            let matchedUnitType: ProductUnitType | null = null;
+            if (product.unit_types) {
+              for (const ut of product.unit_types) {
+                if (ut.barcodes?.some(b => b.barcode === barcode)) {
+                  matchedUnitType = ut;
+                  break;
+                }
+              }
+            }
+
             // Find first empty row or add new row
             const emptyIndex = items.findIndex(item => !item.product_id);
             if (emptyIndex !== -1) {
-              // Update the items state properly
               const newItems = [...items];
               newItems[emptyIndex] = {
                 ...newItems[emptyIndex],
                 product_id: product.id.toString(),
-                unit_cost: product.cost_price || 0,
-                unit_type: product.unit_type || 'piece',
+                unit_cost: Number(product.cost_price) || 0,
+                unit_type: matchedUnitType ? matchedUnitType.name.toLowerCase() : (product.unit_type || 'piece'),
+                product_unit_type_id: matchedUnitType ? matchedUnitType.id : (product.unit_types?.length ? (product.unit_types.find(ut => ut.is_base)?.id || null) : null),
+                conversion_factor: matchedUnitType ? matchedUnitType.conversion_factor : (product.unit_types?.length ? (product.unit_types.find(ut => ut.is_base)?.conversion_factor || 1) : 1),
               };
               setItems(newItems);
             } else {
-              // Add new item
               setItems([...items, {
                 product_id: product.id.toString(),
                 quantity_ordered: 1,
-                unit_cost: product.cost_price || 0,
-                unit_type: product.unit_type || 'piece',
+                unit_cost: Number(product.cost_price) || 0,
+                unit_type: matchedUnitType ? matchedUnitType.name.toLowerCase() : (product.unit_type || 'piece'),
+                product_unit_type_id: matchedUnitType ? matchedUnitType.id : (product.unit_types?.length ? (product.unit_types.find(ut => ut.is_base)?.id || null) : null),
+                conversion_factor: matchedUnitType ? matchedUnitType.conversion_factor : (product.unit_types?.length ? (product.unit_types.find(ut => ut.is_base)?.conversion_factor || 1) : 1),
                 manufacturing_date: '',
                 expiry_date: '',
                 batch_number: '',
               }]);
             }
-            
-            toast.success(`Added: ${product.name}`);
+
+            toast.success(`Added: ${product.name}${matchedUnitType ? ` (${matchedUnitType.name})` : ''}`);
           } catch (error: any) {
             toast.error(error.response?.data?.message || 'Product not found');
           }
@@ -113,8 +141,8 @@ export default function PurchaseOrderCreate() {
 
   const loadSuppliers = async () => {
     try {
-      const data = await supplierApi.getAll();
-      setSuppliers(data.filter((s: Supplier) => s.is_active));
+      const result = await supplierApi.getAll();
+      setSuppliers(result.data.filter((s: Supplier) => s.is_active));
     } catch (error) {
       toast.error('Failed to load suppliers');
     }
@@ -132,14 +160,16 @@ export default function PurchaseOrderCreate() {
   };
 
   const addItem = () => {
-    setItems([...items, { 
-      product_id: '', 
-      quantity_ordered: 1, 
-      unit_cost: 0, 
+    setItems([...items, {
+      product_id: '',
+      quantity_ordered: 1,
       unit_type: 'piece',
+      product_unit_type_id: null,
+      conversion_factor: 1,
+      unit_cost: 0,
       batch_number: '',
       expiry_date: '',
-      manufacturing_date: ''
+      manufacturing_date: '',
     }]);
   };
 
@@ -186,6 +216,66 @@ export default function PurchaseOrderCreate() {
     setItems(updated);
   };
 
+  const handleProductSelect = (index: number, productId: string) => {
+    const product = products.find(p => p.id.toString() === productId);
+    const updated = [...items];
+    const costPrice = Number(product?.cost_price) || 0;
+
+    updated[index] = {
+      ...updated[index],
+      product_id: productId,
+      unit_cost: costPrice,
+    };
+
+    // If product has more than one unit type, default to the base unit type
+    if (product?.unit_types && product.unit_types.length > 1) {
+      const baseUnit = product.unit_types.find(ut => ut.is_base) || product.unit_types[0];
+      updated[index].unit_type = baseUnit.name.toLowerCase();
+      updated[index].product_unit_type_id = baseUnit.id;
+      updated[index].conversion_factor = baseUnit.conversion_factor;
+    } else if (product?.unit_types && product.unit_types.length === 1) {
+      // Product has only base unit type — default to Piece
+      const baseUnit = product.unit_types[0];
+      updated[index].unit_type = baseUnit.name.toLowerCase();
+      updated[index].product_unit_type_id = baseUnit.id;
+      updated[index].conversion_factor = 1;
+    } else {
+      updated[index].unit_type = product?.unit_type || 'piece';
+      updated[index].product_unit_type_id = null;
+      updated[index].conversion_factor = 1;
+    }
+
+    setItems(updated);
+  };
+
+  const handleUnitTypeSelect = (index: number, unitTypeId: number) => {
+    const product = products.find(p => p.id.toString() === items[index].product_id);
+    if (!product?.unit_types) return;
+
+    const unitType = product.unit_types.find(ut => ut.id === unitTypeId);
+    if (!unitType) return;
+
+    const updated = [...items];
+    const currentUnitCost = Number(updated[index].unit_cost) || 0;
+    const currentConversionFactor = updated[index].conversion_factor || 1;
+
+    // Calculate per-piece cost from current unit cost and conversion factor
+    const perPieceCost = currentConversionFactor > 0 ? currentUnitCost / currentConversionFactor : 0;
+
+    // Recalculate unit cost for the new unit type
+    const newConversionFactor = unitType.conversion_factor;
+    const newUnitCost = perPieceCost > 0 ? Math.round(perPieceCost * newConversionFactor * 100) / 100 : 0;
+
+    updated[index] = {
+      ...updated[index],
+      unit_type: unitType.name.toLowerCase(),
+      product_unit_type_id: unitType.id,
+      conversion_factor: newConversionFactor,
+      unit_cost: newUnitCost || currentUnitCost,
+    };
+    setItems(updated);
+  };
+
   const handleBarcodeClick = (index: number) => {
     setScanningForIndex(index);
     setShowScanner(true);
@@ -194,18 +284,33 @@ export default function PurchaseOrderCreate() {
   const handleBarcodeScan = async (barcode: string) => {
     try {
       const product = await productApi.searchByBarcode(barcode);
-      
+
       if (scanningForIndex !== null) {
-        updateItem(scanningForIndex, 'product_id', product.id.toString());
-        
-        // Auto-fill unit cost with product's cost price if available
-        if (product.cost_price) {
-          updateItem(scanningForIndex, 'unit_cost', product.cost_price);
+        // Check if the barcode matches a unit type barcode
+        let matchedUnitType: ProductUnitType | null = null;
+        if (product.unit_types) {
+          for (const ut of product.unit_types) {
+            if (ut.barcodes?.some(b => b.barcode === barcode)) {
+              matchedUnitType = ut;
+              break;
+            }
+          }
         }
-        
-        toast.success(`Product "${product.name}" added`);
+
+        const updated = [...items];
+        updated[scanningForIndex] = {
+          ...updated[scanningForIndex],
+          product_id: product.id.toString(),
+          unit_cost: Number(product.cost_price) || 0,
+          unit_type: matchedUnitType ? matchedUnitType.name.toLowerCase() : (product.unit_types?.length ? (product.unit_types.find(ut => ut.is_base)?.name.toLowerCase() || 'piece') : (product.unit_type || 'piece')),
+          product_unit_type_id: matchedUnitType ? matchedUnitType.id : (product.unit_types?.length ? (product.unit_types.find(ut => ut.is_base)?.id || null) : null),
+          conversion_factor: matchedUnitType ? matchedUnitType.conversion_factor : (product.unit_types?.length ? (product.unit_types.find(ut => ut.is_base)?.conversion_factor || 1) : 1),
+        };
+        setItems(updated);
+
+        toast.success(`Product "${product.name}" added${matchedUnitType ? ` (${matchedUnitType.name})` : ''}`);
       }
-      
+
       setShowScanner(false);
       setScanningForIndex(null);
     } catch (error: any) {
@@ -288,7 +393,17 @@ export default function PurchaseOrderCreate() {
       await purchaseOrderApi.create({
         ...formData,
         supplier_id: parseInt(formData.supplier_id),
-        items,
+        items: items.map(item => ({
+          product_id: parseInt(item.product_id),
+          quantity_ordered: item.quantity_ordered,
+          unit_cost: item.unit_cost,
+          unit_type: item.unit_type,
+          product_unit_type_id: item.product_unit_type_id,
+          conversion_factor: item.conversion_factor,
+          batch_number: item.batch_number || undefined,
+          expiry_date: item.expiry_date || undefined,
+          manufacturing_date: item.manufacturing_date || undefined,
+        })),
       });
       toast.success('Purchase order created successfully');
       navigate('/admin/purchase-orders');
@@ -312,7 +427,7 @@ export default function PurchaseOrderCreate() {
   const total = items.reduce((sum, item) => sum + (item.quantity_ordered * item.unit_cost), 0);
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="ghost" size="icon" onClick={() => navigate('/admin/purchase-orders')}>
@@ -320,7 +435,7 @@ export default function PurchaseOrderCreate() {
           </Button>
           <div>
             <h1 className="text-3xl font-bold">Create Purchase Order</h1>
-            <p className="text-muted-foreground">Order stock from suppliers</p>
+            <p className="text-muted-foreground dark:text-muted-foreground/80">Order stock from suppliers</p>
           </div>
         </div>
         
@@ -361,7 +476,7 @@ export default function PurchaseOrderCreate() {
                     {suppliers.map((s) => (
                       <SelectItem key={s.id} value={s.id.toString()}>
                         {s.name} 
-                        <span className="text-xs text-muted-foreground ml-2">
+                        <span className="text-xs text-muted-foreground dark:text-muted-foreground/80 ml-2">
                           ({s.payment_terms?.replace('_', ' ') || 'credit'})
                         </span>
                       </SelectItem>
@@ -369,7 +484,7 @@ export default function PurchaseOrderCreate() {
                   </SelectContent>
                 </Select>
                 {formData.supplier_id && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                     The payment method is prefilled from the supplier's default payment method
                   </p>
                 )}
@@ -411,7 +526,7 @@ export default function PurchaseOrderCreate() {
                     <SelectItem value="credit_60">⏰ Credit 60 Days</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                   You can change the payment method if needed
                 </p>
               </div>
@@ -476,7 +591,7 @@ export default function PurchaseOrderCreate() {
                         <ProductSearchSelect
                           products={products}
                           value={item.product_id}
-                          onChange={(v) => updateItem(index, 'product_id', v)}
+                          onChange={(v) => handleProductSelect(index, v)}
                           placeholder="Select product"
                         />
                         <Button
@@ -509,26 +624,96 @@ export default function PurchaseOrderCreate() {
                       />
                     </div>
 
-                    <div className="w-28 space-y-2">
+                    <div className="w-40 space-y-2">
                       <Label>Unit Type *</Label>
-                      <Select value={item.unit_type || 'piece'} onValueChange={(v) => updateItem(index, 'unit_type', v)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="piece">Piece</SelectItem>
-                          <SelectItem value="carton">Carton</SelectItem>
-                          <SelectItem value="box">Box</SelectItem>
-                          <SelectItem value="pack">Pack</SelectItem>
-                          <SelectItem value="dozen">Dozen</SelectItem>
-                          <SelectItem value="kg">Kg</SelectItem>
-                          <SelectItem value="liter">Liter</SelectItem>
-                          <SelectItem value="meter">Meter</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      {selectedProduct?.unit_types && selectedProduct.unit_types.length > 1 ? (
+                        <Select
+                          value={item.product_unit_type_id?.toString() || ''}
+                          onValueChange={(v) => handleUnitTypeSelect(index, parseInt(v))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {selectedProduct.unit_types
+                              .sort((a: ProductUnitType, b: ProductUnitType) => a.sort_order - b.sort_order)
+                              .map((ut: ProductUnitType) => (
+                                <SelectItem key={ut.id} value={ut.id.toString()}>
+                                  {ut.name} {ut.is_base ? '(base)' : `(${ut.conversion_factor} pcs)`}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Select
+                          value={item.product_unit_type_id
+                            ? `ut_${item.product_unit_type_id}`
+                            : item.unit_type || 'piece'}
+                          onValueChange={(v) => {
+                            if (v.startsWith('ut_')) {
+                              const unitTypeId = parseInt(v.replace('ut_', ''));
+                              handleUnitTypeSelect(index, unitTypeId);
+                            } else {
+                              // Standard unit type — set conversion factor based on selection
+                              const conversionMap: Record<string, number> = {
+                                piece: 1, carton: 12, box: 24, pack: 6, dozen: 12,
+                                bag: 10, crate: 24, bundle: 20, sack: 50, kg: 1, liter: 1, meter: 1,
+                              };
+                              const factor = conversionMap[v] || 1;
+                              const baseUnitTypeId = selectedProduct?.unit_types?.find(ut => ut.is_base)?.id || null;
+
+                              // Recalculate unit cost based on per-piece cost
+                              const currentUnitCost = Number(item.unit_cost) || 0;
+                              const currentConversionFactor = item.conversion_factor || 1;
+                              const perPieceCost = currentConversionFactor > 0 ? currentUnitCost / currentConversionFactor : 0;
+                              const newUnitCost = perPieceCost > 0 ? Math.round(perPieceCost * factor * 100) / 100 : currentUnitCost;
+
+                              const updated = [...items];
+                              updated[index] = {
+                                ...updated[index],
+                                unit_type: v,
+                                product_unit_type_id: v === 'piece' ? baseUnitTypeId : null,
+                                conversion_factor: factor,
+                                unit_cost: newUnitCost,
+                              };
+                              setItems(updated);
+                            }
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="piece">Piece</SelectItem>
+                            <SelectItem value="carton">Carton</SelectItem>
+                            <SelectItem value="box">Box</SelectItem>
+                            <SelectItem value="pack">Pack</SelectItem>
+                            <SelectItem value="dozen">Dozen</SelectItem>
+                            <SelectItem value="bag">Bag</SelectItem>
+                            <SelectItem value="crate">Crate</SelectItem>
+                            <SelectItem value="bundle">Bundle</SelectItem>
+                            <SelectItem value="sack">Sack</SelectItem>
+                            <SelectItem value="kg">Kg</SelectItem>
+                            <SelectItem value="liter">Liter</SelectItem>
+                            <SelectItem value="meter">Meter</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
 
-                    <div className="w-32 space-y-2">
+                    {item.conversion_factor > 1 && !item.product_unit_type_id && (
+                      <div className="w-24 space-y-2">
+                        <Label>Pcs/Unit</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={item.conversion_factor || ''}
+                          onChange={(e) => updateItem(index, 'conversion_factor', parseFloat(e.target.value) || 1)}
+                        />
+                      </div>
+                    )}
+
+                    <div className="w-36 space-y-2">
                       <Label>Unit Cost (₦) *</Label>
                       <Input
                         type="number"
@@ -537,6 +722,11 @@ export default function PurchaseOrderCreate() {
                         value={item.unit_cost || ''}
                         onChange={(e) => updateItem(index, 'unit_cost', parseFloat(e.target.value) || 0)}
                       />
+                      {item.conversion_factor > 1 && item.unit_cost > 0 && (
+                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                          = ₦{(item.unit_cost / item.conversion_factor).toFixed(2)}/piece
+                        </p>
+                      )}
                     </div>
 
                     <Button
@@ -551,11 +741,25 @@ export default function PurchaseOrderCreate() {
                     </Button>
                   </div>
 
+                  {/* Conversion factor info */}
+                  {item.conversion_factor > 1 && (
+                    <div className="flex items-center gap-3 text-sm text-muted-foreground dark:text-muted-foreground/80 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 rounded-md border border-blue-200 dark:border-blue-800">
+                      <span className="font-medium">
+                        1 {selectedProduct?.unit_types?.find((ut: ProductUnitType) => ut.id === item.product_unit_type_id)?.name || item.unit_type} = {item.conversion_factor} Pieces
+                      </span>
+                      {item.unit_cost > 0 && (
+                        <span className="text-green-600 dark:text-green-400">
+                          (₦{item.unit_cost.toFixed(2)} per {selectedProduct?.unit_types?.find((ut: ProductUnitType) => ut.id === item.product_unit_type_id)?.name || item.unit_type} = ₦{(item.unit_cost / item.conversion_factor).toFixed(2)}/piece)
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* Batch & Expiry Fields - Show when product has tracking enabled OR always show for flexibility */}
                   <div className="grid grid-cols-3 gap-4 pt-3 border-t">
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2">
-                        <Package className="h-3.5 w-3.5 text-muted-foreground" />
+                        <Package className="h-3.5 w-3.5 text-muted-foreground dark:text-muted-foreground/80" />
                         Batch Number {selectedProduct?.track_batch && <span className="text-red-500 dark:text-red-400">*</span>}
                       </Label>
                       <Input
@@ -566,7 +770,7 @@ export default function PurchaseOrderCreate() {
                         className={selectedProduct?.track_batch ? 'border-blue-300 dark:border-blue-800' : ''}
                       />
                       {selectedProduct?.track_batch && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                           ⚠️ Required for this product
                         </p>
                       )}
@@ -574,7 +778,7 @@ export default function PurchaseOrderCreate() {
 
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2">
-                        <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                        <Calendar className="h-3.5 w-3.5 text-muted-foreground dark:text-muted-foreground/80" />
                         Manufacturing Date (Optional)
                       </Label>
                       <MonthYearPicker
@@ -598,7 +802,7 @@ export default function PurchaseOrderCreate() {
                         className={selectedProduct?.track_expiry ? 'border-orange-300 dark:border-orange-800' : ''}
                       />
                       {selectedProduct?.track_expiry && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                           ⚠️ Required for this product
                         </p>
                       )}

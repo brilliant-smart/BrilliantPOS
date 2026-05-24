@@ -104,7 +104,7 @@
     --secondary-foreground: 150 8% 96%;
 
     --muted: 150 10% 20%; /* Lighter muted areas */
-    --muted-foreground: 150 8% 70%; /* Brighter muted text */
+    --muted-foreground: 150 8% 72%; /* Brighter muted text */
 
     --accent: 150 52% 55%;
     --accent-foreground: 150 10% 10%;
@@ -143,10 +143,13 @@
     --secondary-foreground: 150 60% 90%;
 
     --muted: 150 25% 15%;
-    --muted-foreground: 150 20% 60%;
+    --muted-foreground: 150 15% 70%;
 
     --accent: 155 70% 50%;
     --accent-foreground: 150 50% 8%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
 
     --border: 150 30% 20%;
     --input: 150 30% 18%;
@@ -235,6 +238,8 @@
 
 .react-datepicker {
   font-family: "DM Sans", sans-serif;
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
@@ -261,6 +266,7 @@
 
 .react-datepicker__day:hover {
   background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 .react-datepicker__day--selected,
@@ -284,4 +290,54 @@
 .react-datepicker__today-button:hover {
   background-color: hsl(var(--primary));
   opacity: 0.9;
+}
+
+/* React DatePicker dark mode for dropdown selects */
+.dark .react-datepicker__header__dropdown select,
+.dark .react-datepicker__month-dropdown-container select,
+.dark .react-datepicker__year-dropdown-container select,
+.dark .react-datepicker__month-select,
+.dark .react-datepicker__year-select {
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.dark .react-datepicker__month-dropdown,
+.dark .react-datepicker__year-dropdown {
+  background-color: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+}
+
+/* React Day Picker (shadcn Calendar) — Dark mode fixes */
+.rdp-day_today:not(.rdp-day_outside) {
+  font-weight: bold;
+}
+
+.rdp-day_outside {
+  opacity: 0.5;
+}
+
+.rdp-button[disabled]:not(.rdp-day_selected) {
+  opacity: 0.25;
+}
+
+/* Calendar dropdown selects in dark mode */
+.dark select[class*="rdp-dropdown"],
+.dark .rdp-dropdown select,
+.dark [class*="caption_dropdowns"] select {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+}
+
+.dark select[class*="rdp-dropdown"] option,
+.dark .rdp-dropdown select option,
+.dark [class*="caption_dropdowns"] select option {
+  background-color: hsl(var(--popover));
+  color: hsl(var(--foreground));
 }

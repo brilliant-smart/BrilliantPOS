@@ -93,11 +93,11 @@ export default function ExpenseEdit() {
     }
     
     if (formData.expense_date) {
-      const selectedDate = new Date(formData.expense_date);
+      // Compare YYYY-MM-DD strings directly to avoid timezone issues
       const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (selectedDate > today) {
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+      if (formData.expense_date > todayStr) {
         newErrors.expense_date = 'Expense date cannot be in the future';
       }
     }
@@ -271,8 +271,8 @@ export default function ExpenseEdit() {
               <div className="space-y-2">
                 <Label htmlFor="expense_date">Expense Date <span className="text-destructive">*</span></Label>
                 <DatePicker
-                  date={formData.expense_date ? new Date(formData.expense_date) : new Date()}
-                  onDateChange={(date) => handleChange('expense_date', date ? date.toISOString().split('T')[0] : '')}
+                  value={formData.expense_date}
+                  onChange={(value) => handleChange('expense_date', value)}
                   maxDate={new Date()}
                   className={errors.expense_date ? 'border-destructive' : ''}
                 />

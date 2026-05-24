@@ -184,7 +184,9 @@ class FinancialReportService
             $sales = $product->stockMovements()->where('type', 'sale')->sum('quantity');
             $adjustments = $product->stockMovements()->where('type', 'adjustment')->sum('quantity');
 
-            $expectedStock = $initialStock + $purchases + abs($sales) + $adjustments;
+            // Sales quantities are stored as negative values (e.g. -5).
+            // Add directly instead of abs() — using abs() would flip deductions to additions.
+            $expectedStock = $initialStock + $purchases + $sales + $adjustments;
             $actualStock = $product->stock_quantity;
             $variance = $actualStock - $expectedStock;
 
@@ -252,7 +254,7 @@ class FinancialReportService
 
         $products = $query->orderBy('expiry_date')->get()->map(function ($product) {
             $expiryDate = Carbon::parse($product->expiry_date);
-            $daysUntilExpiry = Carbon::now()->diffInDays($expiryDate, false);
+            $daysUntilExpiry = (int) round(Carbon::now()->diffInDays($expiryDate, false));
             $stockValue = $product->stock_quantity * $product->cost_price;
 
             return [

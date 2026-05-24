@@ -1,4 +1,10 @@
 import { useState, useCallback, useMemo } from 'react';
+import {
+  calcTotalPaid,
+  calcBalance,
+  calcChange,
+  canCompleteSale,
+} from '@/modules/pos/utils/posCalculationsPayment';
 
 export type PaymentMethod = 'cash' | 'card' | 'pos' | 'credit' | 'bank_transfer';
 
@@ -41,27 +47,18 @@ export const usePosPayment = (totalAmount: number): UsePosPaymentReturn => {
   }, []);
 
   // Calculate total paid
-  const totalPaid = useMemo(() => {
-    return payments.reduce((sum, p) => sum + p.amount, 0);
-  }, [payments]);
+  const totalPaid = useMemo(() => calcTotalPaid(payments), [payments]);
 
   // Calculate balance (remaining to pay)
-  const balance = useMemo(() => {
-    return Math.max(0, totalAmount - totalPaid);
-  }, [totalAmount, totalPaid]);
+  const balance = useMemo(() => calcBalance(totalAmount, totalPaid), [totalAmount, totalPaid]);
 
   // Calculate change (overpayment)
-  const change = useMemo(() => {
-    return Math.max(0, totalPaid - totalAmount);
-  }, [totalPaid, totalAmount]);
+  const change = useMemo(() => calcChange(totalAmount, totalPaid), [totalPaid, totalAmount]);
 
   // Can complete sale?
   const canComplete = useMemo(() => {
-    // If credit payment exists, allow completion even if unpaid
     const hasCreditPayment = payments.some(p => p.method === 'credit');
-    
-    // Otherwise, must be fully paid
-    return hasCreditPayment || totalPaid >= totalAmount;
+    return canCompleteSale(totalAmount, totalPaid, hasCreditPayment);
   }, [payments, totalPaid, totalAmount]);
 
   return {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Product;
 use App\Services\InventoryService;
 use Illuminate\Http\Request;
@@ -39,6 +40,8 @@ class InventoryController extends Controller
             $validated['unit_cost'] ?? null
         );
 
+        AuditLog::log('stock.add', $product, null, ['quantity_added' => $validated['quantity']], "Added {$validated['quantity']} to {$product->name}");
+
         return response()->json([
             'message' => 'Stock added successfully',
             'product' => $product->fresh(),
@@ -66,6 +69,8 @@ class InventoryController extends Controller
             $validated['notes'] ?? null
         );
 
+        AuditLog::log('stock.reduce', $product, null, ['quantity_reduced' => $validated['quantity']], "Reduced {$validated['quantity']} from {$product->name}");
+
         return response()->json([
             'message' => 'Stock reduced successfully',
             'product' => $product->fresh(),
@@ -90,6 +95,8 @@ class InventoryController extends Controller
             $validated['quantity'],
             $validated['notes'] ?? null
         );
+
+        AuditLog::log('stock.adjust', $product, null, $validated, "Stock adjusted for {$product->name}");
 
         return response()->json([
             'message' => 'Stock adjusted successfully',
@@ -180,6 +187,8 @@ class InventoryController extends Controller
 
             return $results;
         });
+
+        AuditLog::logAction('stock.bulk_adjust', 'Product', null, null, null, "Bulk stock adjustment for " . count($validated['updates']) . " products");
 
         return response()->json([
             'message' => 'Bulk stock update completed',

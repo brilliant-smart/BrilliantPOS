@@ -9,6 +9,8 @@ export interface Settings {
     store_tagline: string;
     currency_symbol: string;
     vat_rate: number;
+    credit_overdue_threshold_days: number;
+    receipt_prompt_enabled: boolean;
   };
   receipt: {
     receipt_footer: string;

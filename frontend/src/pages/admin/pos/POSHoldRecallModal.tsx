@@ -7,6 +7,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -37,6 +47,7 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
   const [heldCarts, setHeldCarts] = useState<HeldCart[]>([]);
   const [loading, setLoading] = useState(false);
   const [notes, setNotes] = useState('');
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -88,7 +99,7 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
       cart.clearCart();
       
       heldCart.items.forEach((item: any) => {
-        // We need to reconstruct the product object
+        // Reconstruct the product object
         const product = {
           id: item.product_id,
           name: item.product_name,
@@ -98,15 +109,26 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
           cost_price: item.cost_price,
           stock_quantity: item.stock_available,
         };
-        
-        // Add item with correct quantity
-        for (let i = 0; i < item.quantity; i++) {
-          cart.addItem(product as any);
+
+        // Reconstruct unit type if present
+        const unitType = item.unit_type_id ? {
+          id: item.unit_type_id,
+          name: item.unit_type,
+          conversion_factor: item.conversion_factor || 1,
+          selling_price: item.unit_price,
+        } : null;
+
+        const cartKey = `${item.product_id}_${item.unit_type_id ?? 'base'}`;
+
+        // Add the item once, then set the correct quantity directly
+        cart.addItem(product as any, unitType as any);
+        if (item.quantity > 1) {
+          cart.updateQuantity(cartKey, item.quantity);
         }
-        
+
         // Apply line discount if exists
         if (item.discount > 0) {
-          cart.applyLineDiscount(item.product_id, item.discount);
+          cart.applyLineDiscount(cartKey, item.discount);
         }
       });
 
@@ -122,12 +144,13 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
     }
   };
 
-  const handleDeleteHeldCart = async (heldCartId: number) => {
-    if (!confirm('Delete this held cart?')) return;
+  const handleDeleteHeldCart = async () => {
+    if (!deleteTargetId) return;
 
     try {
-      await posApi.deleteHeldCart(heldCartId);
+      await posApi.deleteHeldCart(deleteTargetId);
       toast.success('Held cart deleted');
+      setDeleteTargetId(null);
       loadHeldCarts();
     } catch (error: any) {
       toast.error('Failed to delete held cart');
@@ -168,14 +191,14 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
           {/* Hold Tab */}
           <TabsContent value="hold" className="space-y-4">
             {cart.items.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Archive className="h-12 w-12 mx-auto mb-3 opacity-20" />
+              <div className="text-center py-12 text-muted-foreground dark:text-muted-foreground/80">
+                <Archive className="h-12 w-12 mx-auto mb-3 opacity-20 dark:opacity-40" />
                 <p>Cart is empty</p>
               </div>
             ) : (
               <>
                 <div className="bg-background p-4 rounded-lg">
-                  <p className="text-sm text-muted-foreground mb-2">Current Cart Summary:</p>
+                  <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 mb-2">Current Cart Summary:</p>
                   <div className="space-y-1">
                     <p><strong>Items:</strong> {cart.itemCount}</p>
                     <p><strong>Total:</strong> ₦{cart.grandTotal.toLocaleString()}</p>
@@ -204,11 +227,11 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
           <TabsContent value="recall">
             {loading ? (
               <div className="text-center py-12">
-                <p className="text-muted-foreground">Loading held carts...</p>
+                <p className="text-muted-foreground dark:text-muted-foreground/80">Loading held carts...</p>
               </div>
             ) : heldCarts.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <RotateCcw className="h-12 w-12 mx-auto mb-3 opacity-20" />
+              <div className="text-center py-12 text-muted-foreground dark:text-muted-foreground/80">
+                <RotateCcw className="h-12 w-12 mx-auto mb-3 opacity-20 dark:opacity-40" />
                 <p>No held carts</p>
               </div>
             ) : (
@@ -221,11 +244,11 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
                     <div className="flex items-start justify-between mb-3">
                       <div>
                         <p className="font-semibold text-lg">{heldCart.reference}</p>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                           {format(new Date(heldCart.held_at), 'PPp')}
                         </p>
                         {heldCart.customer && (
-                          <p className="text-sm text-muted-foreground mt-1">
+                          <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 mt-1">
                             Customer: {heldCart.customer.name}
                           </p>
                         )}
@@ -236,7 +259,7 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
                     </div>
 
                     {heldCart.notes && (
-                      <p className="text-sm text-muted-foreground mb-3 italic">
+                      <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 mb-3 italic">
                         "{heldCart.notes}"
                       </p>
                     )}
@@ -257,7 +280,7 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleDeleteHeldCart(heldCart.id)}
+                          onClick={() => setDeleteTargetId(heldCart.id)}
                           className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-400"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -271,6 +294,23 @@ export default function POSHoldRecallModal({ open, onClose, cart }: POSHoldRecal
           </TabsContent>
         </Tabs>
       </DialogContent>
+
+      <AlertDialog open={deleteTargetId !== null} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Held Cart?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The held cart and all its items will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteHeldCart} className="bg-red-600 hover:bg-red-700">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

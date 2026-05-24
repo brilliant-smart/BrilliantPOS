@@ -163,7 +163,7 @@ export default function SupplierPriceComparison() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Supplier Price Comparison</h1>
-          <p className="text-muted-foreground">Compare prices across suppliers and identify savings opportunities</p>
+          <p className="text-muted-foreground dark:text-muted-foreground/80">Compare prices across suppliers and identify savings opportunities</p>
         </div>
       </div>
 
@@ -172,22 +172,22 @@ export default function SupplierPriceComparison() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Products Analyzed</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <Package className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{productComparisons.length}</div>
-            <p className="text-xs text-muted-foreground">With multiple suppliers</p>
+            <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">With multiple suppliers</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Suppliers</CardTitle>
-            <Award className="h-4 w-4 text-muted-foreground" />
+            <Award className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{supplierPerformance.length}</div>
-            <p className="text-xs text-muted-foreground">Active suppliers tracked</p>
+            <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">Active suppliers tracked</p>
           </CardContent>
         </Card>
 
@@ -200,7 +200,7 @@ export default function SupplierPriceComparison() {
             <div className="text-2xl font-bold text-green-600 dark:text-green-400">
               ₦{calculateTotalSavings().toFixed(2)}
             </div>
-            <p className="text-xs text-muted-foreground">By choosing best prices</p>
+            <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">By choosing best prices</p>
           </CardContent>
         </Card>
 
@@ -215,7 +215,7 @@ export default function SupplierPriceComparison() {
                 ? ((calculateTotalSavings() / productComparisons.length)).toFixed(2)
                 : '0.00'}%
             </div>
-            <p className="text-xs text-muted-foreground">Per product average</p>
+            <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">Per product average</p>
           </CardContent>
         </Card>
       </div>
@@ -235,7 +235,7 @@ export default function SupplierPriceComparison() {
                 <CardTitle>Price Comparison by Product</CardTitle>
                 <div className="flex gap-2">
                   <div className="relative w-64">
-                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                     <Input
                       placeholder="Search products..."
                       value={searchTerm}
@@ -254,7 +254,7 @@ export default function SupplierPriceComparison() {
               {loading ? (
                 <div className="text-center py-8">Loading comparison data...</div>
               ) : filteredComparisons.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
+                <div className="text-center py-8 text-muted-foreground dark:text-muted-foreground/80">
                   No products found with multiple suppliers
                 </div>
               ) : (
@@ -265,7 +265,7 @@ export default function SupplierPriceComparison() {
                         <div className="flex items-start justify-between">
                           <div>
                             <h3 className="font-semibold text-lg">{product.product_name}</h3>
-                            <p className="text-sm text-muted-foreground">SKU: {product.product_sku}</p>
+                            <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">SKU: {product.product_sku}</p>
                             <p className="text-sm">Current Cost: ₦{product.current_cost_price.toFixed(2)}</p>
                           </div>
                           {product.price_range && (
@@ -309,7 +309,7 @@ export default function SupplierPriceComparison() {
                                 <TableCell className="text-green-600 dark:text-green-400">₦{Number(supplier.min_price).toFixed(2)}</TableCell>
                                 <TableCell className="text-red-600 dark:text-red-400">₦{Number(supplier.max_price).toFixed(2)}</TableCell>
                                 <TableCell>{supplier.purchase_count}</TableCell>
-                                <TableCell className="text-sm text-muted-foreground">
+                                <TableCell className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                                   {format(new Date(supplier.last_purchase_date), 'MMM dd, yyyy')}
                                 </TableCell>
                               </TableRow>
@@ -341,7 +341,7 @@ export default function SupplierPriceComparison() {
               {loading ? (
                 <div className="text-center py-8">Loading supplier performance...</div>
               ) : supplierPerformance.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
+                <div className="text-center py-8 text-muted-foreground dark:text-muted-foreground/80">
                   No supplier data available
                 </div>
               ) : (
@@ -386,7 +386,7 @@ export default function SupplierPriceComparison() {
                             {Number(supplier.price_trend.stability_score).toFixed(0)}%
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-sm text-muted-foreground dark:text-muted-foreground/80">
                           {format(new Date(supplier.last_purchase), 'MMM dd, yyyy')}
                         </TableCell>
                       </TableRow>

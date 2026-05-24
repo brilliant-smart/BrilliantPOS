@@ -3,14 +3,23 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Traits\EscapesLikeWildcards;
+use App\Models\AuditLog;
 use App\Models\PurchaseOrder;
 use App\Services\PurchaseOrderService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
+use App\Http\Requests\CreatePurchaseOrderRequest;
+use App\Http\Requests\UpdatePurchaseOrderRequest;
+use App\Traits\ConvertsDateToMonthEnd;
 use Illuminate\Http\Request;
 // PDF library - will be loaded dynamically if available
 
 class PurchaseOrderController extends Controller
 {
-    use \Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+    use EscapesLikeWildcards;
+    use \Illuminate\Foundation\Auth\Access\AuthorizesRequests, ConvertsDateToMonthEnd;
     protected $purchaseOrderService;
 
     public function __construct(PurchaseOrderService $purchaseOrderService)
@@ -51,7 +60,7 @@ class PurchaseOrderController extends Controller
 
         // Search
         if ($request->filled('search')) {
-            $search = $request->search;
+            $search = $this->escapeLike($request->search);
             $query->where(function ($q) use ($search) {
                 $q->where('po_number', 'like', "%{$search}%")
                   ->orWhereHas('supplier', function ($sq) use ($search) {
@@ -60,7 +69,7 @@ class PurchaseOrderController extends Controller
             });
         }
 
-        $purchaseOrders = $query->latest('order_date')
+        $purchaseOrders = $query->latest('created_at')
             ->paginate($request->input('per_page', 15));
 
         return response()->json($purchaseOrders);
@@ -115,7 +124,7 @@ class PurchaseOrderController extends Controller
      * Store a new purchase order
      * POST /api/purchase-orders
      */
-    public function store(Request $request)
+    public function store(CreatePurchaseOrderRequest $request)
     {
         // Convert month/year expiry dates to last day of month for all items
         if ($request->has('items')) {
@@ -128,30 +137,12 @@ class PurchaseOrderController extends Controller
             $request->merge(['items' => $items]);
         }
 
-        $validated = $request->validate([
-            'supplier_id' => 'required|exists:suppliers,id',
-            'order_date' => 'nullable|date',
-            'expected_delivery_date' => 'nullable|date|after_or_equal:order_date',
-            'payment_method' => 'nullable|in:cash,bank_transfer,cheque,card,credit,credit_7,credit_14,credit_30,credit_60',
-            'payment_due_date' => 'nullable|date',
-            'status' => 'nullable|in:draft,pending',
-            'shipping_cost' => 'nullable|numeric|min:0',
-            'discount_amount' => 'nullable|numeric|min:0',
-            'notes' => 'nullable|string',
-            'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity_ordered' => 'required|integer|min:1',
-            'items.*.unit_cost' => 'required|numeric|min:0',
-            'items.*.unit_type' => 'nullable|string|in:piece,carton,box,pack,dozen,kg,liter,meter',
-            'items.*.discount_percent' => 'nullable|numeric|min:0|max:100',
-            'items.*.notes' => 'nullable|string',
-            'items.*.batch_number' => 'nullable|string|max:255',
-            'items.*.manufacturing_date' => 'nullable|date|before_or_equal:today',
-            'items.*.expiry_date' => 'nullable|date',
-        ]);
+        $validated = $request->validated();
 
         try {
             $po = $this->purchaseOrderService->createPurchaseOrder($validated, $request->user());
+
+            AuditLog::log('purchase_order.create', $po, null, $po->toArray(), "PO {$po->po_number} created");
 
             return response()->json([
                 'message' => 'Purchase order created successfully',
@@ -186,7 +177,7 @@ class PurchaseOrderController extends Controller
      * Update purchase order
      * PUT /api/purchase-orders/{purchaseOrder}
      */
-    public function update(Request $request, PurchaseOrder $purchaseOrder)
+    public function update(UpdatePurchaseOrderRequest $request, PurchaseOrder $purchaseOrder)
     {
         $this->authorize('update', $purchaseOrder);
 
@@ -197,15 +188,11 @@ class PurchaseOrderController extends Controller
             ], 422);
         }
 
-        $validated = $request->validate([
-            'supplier_id' => 'sometimes|required|exists:suppliers,id',
-            'expected_delivery_date' => 'nullable|date',
-            'shipping_cost' => 'nullable|numeric|min:0',
-            'discount_amount' => 'nullable|numeric|min:0',
-            'notes' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
 
         $purchaseOrder->update($validated);
+
+        AuditLog::log('purchase_order.update', $purchaseOrder, null, $purchaseOrder->toArray(), "PO {$purchaseOrder->po_number} updated");
 
         return response()->json([
             'message' => 'Purchase order updated successfully',
@@ -232,6 +219,8 @@ class PurchaseOrderController extends Controller
 
         try {
             $po = $this->purchaseOrderService->approvePurchaseOrder($purchaseOrder, $user);
+
+            AuditLog::log('purchase_order.approve', $purchaseOrder, null, null, "PO {$purchaseOrder->po_number} approved");
 
             return response()->json([
                 'message' => 'Purchase order approved successfully',
@@ -260,9 +249,11 @@ class PurchaseOrderController extends Controller
         $purchaseOrder->update([
             'status' => 'rejected',
             'rejection_reason' => $validated['rejection_reason'],
-            'approved_by' => $request->user()->id,
-            'approved_at' => now(),
+            'rejected_by' => $request->user()->id,
+            'rejected_at' => now(),
         ]);
+
+        AuditLog::log('purchase_order.reject', $purchaseOrder, null, null, "PO {$purchaseOrder->po_number} rejected");
 
         return response()->json([
             'message' => 'Purchase order rejected',
@@ -297,6 +288,8 @@ class PurchaseOrderController extends Controller
                       "CANCELLED by {$user->name} on " . now()->format('Y-m-d H:i:s') .
                       "\nReason: {$validated['cancellation_reason']}",
         ]);
+
+        AuditLog::log('purchase_order.cancel', $purchaseOrder, null, null, "PO {$purchaseOrder->po_number} cancelled");
 
         return response()->json([
             'message' => 'Purchase order cancelled successfully',
@@ -387,6 +380,8 @@ class PurchaseOrderController extends Controller
                 'po_number' => $po->po_number,
             ]);
 
+            AuditLog::log('purchase_order.receive', $purchaseOrder, null, null, "PO {$purchaseOrder->po_number} goods received");
+
             return response()->json([
                 'message' => 'Goods received successfully',
                 'purchase_order' => $po,
@@ -419,56 +414,102 @@ class PurchaseOrderController extends Controller
         ]);
 
         try {
-            // Handle credit payment method
-            // Credit means "pay later" - we record it but don't add to amount_paid yet
-            $paymentMethod = $validated['payment_method'] ?? $purchaseOrder->payment_method;
-            $isCredit = $paymentMethod === 'credit';
+            return DB::transaction(function () use ($validated, $purchaseOrder) {
+                // Lock the PO row to prevent concurrent payment race conditions
+                $lockedPo = PurchaseOrder::lockForUpdate()->findOrFail($purchaseOrder->id);
 
-            // Update amount paid (only if not credit)
-            $currentPaid = $purchaseOrder->amount_paid ?? 0;
-            $newPaid = $isCredit ? $currentPaid : ($currentPaid + $validated['amount']);
+                // Handle credit payment method
+                $paymentMethod = $validated['payment_method'] ?? $lockedPo->payment_method;
+                $isCredit = $paymentMethod === 'credit';
 
-            // Determine payment status
-            $paymentStatus = 'unpaid';
-            if ($isCredit) {
-                // Credit is recorded but marked as partially_paid to allow receiving goods
-                $paymentStatus = 'partially_paid';
-            } elseif ($newPaid >= $purchaseOrder->total_amount) {
-                $paymentStatus = 'paid';
-            } elseif ($newPaid > 0) {
-                $paymentStatus = 'partially_paid';
-            }
+                // Update amount paid (only if not credit)
+                $currentPaid = round((float) ($lockedPo->amount_paid ?? 0), 2);
+                $newPaid = $isCredit ? $currentPaid : round($currentPaid + (float) $validated['amount'], 2);
+                $totalAmount = round((float) $lockedPo->total_amount, 2);
 
-            // Calculate payment due date for credit purchases (30 days default)
-            $paymentDueDate = $purchaseOrder->payment_due_date;
-            if ($isCredit && !$paymentDueDate) {
-                $paymentDueDate = now()->addDays(30);
-            }
+                if (!$isCredit && bccomp((string) $newPaid, (string) $totalAmount, 2) > 0) {
+                    throw new \Exception('Payment amount exceeds total due');
+                }
 
-            $purchaseOrder->update([
-                'amount_paid' => $newPaid,
-                'payment_status' => $paymentStatus,
-                'payment_method' => $paymentMethod,
-                'payment_date' => $validated['payment_date'] ?? now(),
-                'payment_due_date' => $paymentDueDate,
-            ]);
+                // Determine payment status
+                $paymentStatus = 'unpaid';
+                if ($isCredit) {
+                    $paymentStatus = 'partially_paid';
+                } elseif (bccomp((string) $newPaid, (string) $totalAmount, 2) >= 0) {
+                    $paymentStatus = 'paid';
+                } elseif ($newPaid > 0) {
+                    $paymentStatus = 'partially_paid';
+                }
 
-            // TODO: Create payment transaction record
+                // Calculate payment due date for credit purchases (30 days default)
+                $paymentDueDate = $lockedPo->payment_due_date;
+                if ($isCredit && !$paymentDueDate) {
+                    $paymentDueDate = now()->addDays(30);
+                }
 
-            $message = $isCredit
-                ? 'Credit payment recorded. Payment due: ' . ($paymentDueDate ? $paymentDueDate->format('Y-m-d') : 'N/A')
-                : 'Payment recorded successfully';
+                $lockedPo->update([
+                    'amount_paid' => $newPaid,
+                    'payment_status' => $paymentStatus,
+                    'payment_method' => $paymentMethod,
+                    'payment_date' => $validated['payment_date'] ?? now(),
+                    'payment_due_date' => $paymentDueDate,
+                ]);
 
-            return response()->json([
-                'message' => $message,
-                'purchase_order' => $purchaseOrder->load(['items.product', 'supplier']),
-            ]);
+                AuditLog::log('purchase_order.payment', $lockedPo, null, null, "Payment recorded for PO {$lockedPo->po_number}");
+
+                $message = $isCredit
+                    ? 'Credit payment recorded. Payment due: ' . ($paymentDueDate ? $paymentDueDate->format('Y-m-d') : 'N/A')
+                    : 'Payment recorded successfully';
+
+                return response()->json([
+                    'message' => $message,
+                    'purchase_order' => $lockedPo->load(['items.product', 'supplier']),
+                ]);
+            });
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to record payment',
                 'error' => $e->getMessage(),
             ], 422);
         }
+    }
+
+    /**
+     * Generate a short-lived PDF download token
+     * POST /api/purchase-orders/{purchaseOrder}/pdf-token
+     */
+    public function generatePdfToken(PurchaseOrder $purchaseOrder)
+    {
+        $token = Str::random(32);
+        Cache::put("po_pdf_token:{$token}", $purchaseOrder->id, now()->addMinutes(5));
+
+        return response()->json(['token' => $token]);
+    }
+
+    /**
+     * Download purchase order PDF using a short-lived token
+     * GET /purchase-orders/{token}/pdf
+     */
+    public function downloadPdf(string $token)
+    {
+        $poId = Cache::get("po_pdf_token:{$token}");
+
+        if (!$poId) {
+            abort(404, 'PDF link expired or invalid');
+        }
+
+        // Single-use token
+        Cache::forget("po_pdf_token:{$token}");
+
+        $purchaseOrder = PurchaseOrder::with(['items.product', 'supplier', 'creator', 'approver', 'receiver'])
+            ->findOrFail($poId);
+
+        if (class_exists(\Barryvdh\DomPDF\Facade\Pdf::class)) {
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.purchase-order', ['po' => $purchaseOrder]);
+            return $pdf->download("PO-{$purchaseOrder->po_number}.pdf");
+        }
+
+        return view('pdf.purchase-order', ['po' => $purchaseOrder]);
     }
 
     /**
@@ -632,6 +673,8 @@ class PurchaseOrderController extends Controller
             ], 422);
         }
 
+        AuditLog::log('purchase_order.delete', $purchaseOrder, null, null, "PO {$purchaseOrder->po_number} deleted");
+
         $purchaseOrder->delete();
 
         return response()->json([
@@ -639,37 +682,4 @@ class PurchaseOrderController extends Controller
         ]);
     }
 
-    /**
-     * Convert month/year format (YYYY-MM) to last day of month (YYYY-MM-DD)
-     * Example: "2026-03" becomes "2026-03-31"
-     * Full dates are passed through unchanged
-     */
-    private function convertToLastDayOfMonth($date)
-    {
-        if (empty($date)) {
-            return $date;
-        }
-
-        // If already a full date (YYYY-MM-DD), return as is
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            return $date;
-        }
-
-        // If month/year format (YYYY-MM), convert to last day of month
-        if (preg_match('/^\d{4}-\d{2}$/', $date)) {
-            try {
-                $dateObj = \DateTime::createFromFormat('Y-m', $date);
-                if ($dateObj) {
-                    // Get last day of the month
-                    return $dateObj->format('Y-m-t');
-                }
-            } catch (\Exception $e) {
-                // If parsing fails, return original
-                return $date;
-            }
-        }
-
-        // Return original if format not recognized
-        return $date;
-    }
 }

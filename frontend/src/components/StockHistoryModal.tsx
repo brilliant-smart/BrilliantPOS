@@ -77,7 +77,7 @@ export function StockHistoryModal({
   const getQuantityIcon = (quantity: number) => {
     if (quantity > 0) return <TrendingUp className="w-4 h-4 text-green-500 dark:text-green-400" />;
     if (quantity < 0) return <TrendingDown className="w-4 h-4 text-red-500 dark:text-red-400" />;
-    return <Activity className="w-4 h-4 text-muted-foreground" />;
+    return <Activity className="w-4 h-4 text-muted-foreground dark:text-muted-foreground/80" />;
   };
 
   return (
@@ -95,7 +95,7 @@ export function StockHistoryModal({
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : history.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
+          <div className="text-center py-8 text-muted-foreground dark:text-muted-foreground/80">
             No stock movements recorded yet
           </div>
         ) : (
@@ -142,7 +142,7 @@ export function StockHistoryModal({
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right text-muted-foreground">
+                      <TableCell className="text-right text-muted-foreground dark:text-muted-foreground/80">
                         {movement.previous_stock}
                       </TableCell>
                       <TableCell className="text-right font-medium">
@@ -151,7 +151,7 @@ export function StockHistoryModal({
                       <TableCell className="text-sm">
                         {movement.user?.name || "Unknown"}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
+                      <TableCell className="text-sm text-muted-foreground dark:text-muted-foreground/80 max-w-[200px] truncate">
                         {movement.notes || "-"}
                       </TableCell>
                     </TableRow>

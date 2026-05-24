@@ -253,11 +253,11 @@ export default function UserList() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Users</h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground dark:text-muted-foreground/80 mt-1">
             Manage admin users and staff
           </p>
         </div>
@@ -281,7 +281,7 @@ export default function UserList() {
           <TableBody>
             {users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground dark:text-muted-foreground/80">
                   No users found.
                 </TableCell>
               </TableRow>
@@ -462,7 +462,7 @@ export default function UserList() {
                 placeholder={editingUser ? "Enter new password to change" : "Minimum 8 characters"}
               />
               {editingUser && (
-                <p className="text-sm text-muted-foreground mt-1">
+                <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 mt-1">
                   Only enter a password if you want to change it
                 </p>
               )}

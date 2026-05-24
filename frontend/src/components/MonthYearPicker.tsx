@@ -43,10 +43,9 @@ export function MonthYearPicker({
 }: MonthYearPickerProps) {
   const [open, setOpen] = useState(false);
 
-  // Parse the current value
-  const currentDate = value ? new Date(value) : null;
-  const currentMonth = currentDate ? format(currentDate, 'MM') : '';
-  const currentYear = currentDate ? format(currentDate, 'yyyy') : '';
+  // Parse the current value — extract month/year from string to avoid timezone issues
+  const parsedValue = value ? value.substring(0, 7) : null; // "YYYY-MM" or "YYYY-MM-DD" -> "YYYY-MM"
+  const [currentYear, currentMonth] = parsedValue ? parsedValue.split('-') : ['', ''];
 
   // Generate year range
   const currentYearNum = new Date().getFullYear();
@@ -61,9 +60,8 @@ export function MonthYearPicker({
   const handleMonthChange = (month: string) => {
     setSelectedMonth(month);
     if (selectedYear) {
-      // Store as YYYY-MM-01 for database compatibility
-      const newDate = `${selectedYear}-${month}-01`;
-      onChange(newDate);
+      // Send YYYY-MM format — backend ConvertsDateToMonthEnd trait converts to last day of month
+      onChange(`${selectedYear}-${month}`);
       setOpen(false);
     }
   };
@@ -71,9 +69,8 @@ export function MonthYearPicker({
   const handleYearChange = (year: string) => {
     setSelectedYear(year);
     if (selectedMonth) {
-      // Store as YYYY-MM-01 for database compatibility
-      const newDate = `${year}-${selectedMonth}-01`;
-      onChange(newDate);
+      // Send YYYY-MM format — backend ConvertsDateToMonthEnd trait converts to last day of month
+      onChange(`${year}-${selectedMonth}`);
       setOpen(false);
     }
   };
@@ -84,12 +81,12 @@ export function MonthYearPicker({
     const year = format(today, 'yyyy');
     setSelectedMonth(month);
     setSelectedYear(year);
-    onChange(`${year}-${month}-01`);
+    onChange(`${year}-${month}`);
     setOpen(false);
   };
 
-  const displayValue = currentDate 
-    ? format(currentDate, 'MMMM yyyy')  // e.g., "September 2028"
+  const displayValue = parsedValue
+    ? format(new Date(parseInt(currentYear), parseInt(currentMonth) - 1, 15), 'MMMM yyyy')
     : placeholder;
 
   return (
@@ -99,13 +96,13 @@ export function MonthYearPicker({
           variant="outline"
           className={cn(
             "w-full justify-between text-left font-normal",
-            !value && "text-muted-foreground",
+            !value && "text-muted-foreground dark:text-muted-foreground/80",
             className
           )}
           disabled={disabled}
         >
           <span>{displayValue}</span>
-          <CalendarIcon className="ml-2 h-4 w-4 opacity-50" />
+          <CalendarIcon className="ml-2 h-4 w-4 text-muted-foreground dark:text-foreground/70" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-4" align="end">
@@ -157,7 +154,7 @@ export function MonthYearPicker({
 
           {selectedMonth && selectedYear && (
             <div className="pt-2 border-t">
-              <p className="text-sm text-muted-foreground text-center">
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 text-center">
                 Selected: <span className="font-medium text-foreground">
                   {MONTHS.find(m => m.value === selectedMonth)?.label} {selectedYear}
                 </span>

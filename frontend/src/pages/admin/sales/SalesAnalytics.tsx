@@ -54,8 +54,9 @@ export default function SalesAnalytics() {
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatCurrency = (amount: number | undefined | null) => {
+    if (amount == null) return '₦0.00';
+    return `₦${Number(amount).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   if (loading) {
@@ -181,7 +182,7 @@ export default function SalesAnalytics() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-900 dark:text-green-400">{formatCurrency(analytics.summary.total_profit)}</div>
-            <p className="text-xs text-green-700 dark:text-green-400">Margin: {analytics.summary.profit_margin.toFixed(2)}%</p>
+            <p className="text-xs text-green-700 dark:text-green-400">Margin: {(analytics.summary.profit_margin ?? 0).toFixed(2)}%</p>
           </CardContent>
         </Card>
 
@@ -207,13 +208,13 @@ export default function SalesAnalytics() {
           <CardContent>
             <div className="space-y-4">
               {analytics.payment_method_breakdown.map((payment: any, index: number) => {
-                const percentage = ((payment.revenue / analytics.summary.total_revenue) * 100).toFixed(1);
+                const percentage = analytics.summary.total_revenue ? ((payment.total / analytics.summary.total_revenue) * 100).toFixed(1) : '0.0';
                 return (
                   <div key={index} className="space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="font-medium capitalize">{payment.method}</span>
                       <div className="text-right">
-                        <div className="font-bold">{formatCurrency(payment.revenue)}</div>
+                        <div className="font-bold">{formatCurrency(payment.total)}</div>
                         <div className="text-xs text-green-600 dark:text-green-400">Profit: {formatCurrency(payment.profit)}</div>
                       </div>
                     </div>

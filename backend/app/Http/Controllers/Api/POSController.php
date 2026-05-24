@@ -7,8 +7,12 @@ use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductUnitType;
 use App\Models\HeldCart;
 use App\Models\StockMovement;
+use App\Models\AuditLog;
+use App\Http\Requests\ValidateStockRequest;
+use App\Http\Requests\CompleteSaleRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -19,26 +23,26 @@ class POSController extends Controller
      * Validate stock availability before completing sale
      * POST /api/pos/validate-stock
      */
-    public function validateStock(Request $request)
+    public function validateStock(ValidateStockRequest $request)
     {
-        $validated = $request->validate([
-            'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1',
-        ]);
+        $validated = $request->validated();
 
         $errors = [];
 
         foreach ($validated['items'] as $item) {
             $product = Product::find($item['product_id']);
+            $conversionFactor = $item['conversion_factor'] ?? 1;
+            $quantityInBaseUnits = $item['quantity'] * $conversionFactor;
 
-            if ($product->stock_quantity < $item['quantity']) {
+            if ($product->stock_quantity < $quantityInBaseUnits) {
+                $unitTypeName = $item['unit_type'] ?? 'piece';
                 $errors[] = [
                     'product_id' => $product->id,
                     'product_name' => $product->name,
                     'requested' => $item['quantity'],
+                    'requested_base' => $quantityInBaseUnits,
                     'available' => $product->stock_quantity,
-                    'message' => "Insufficient stock for {$product->name}. Available: {$product->stock_quantity}, Requested: {$item['quantity']}",
+                    'message' => "Insufficient stock for {$product->name}. Available: {$product->stock_quantity} pcs, Requested: {$item['quantity']} {$unitTypeName}(s) = {$quantityInBaseUnits} pcs",
                 ];
             }
         }
@@ -60,27 +64,9 @@ class POSController extends Controller
      * Complete POS sale with transaction safety
      * POST /api/pos/complete-sale
      */
-    public function completeSale(Request $request)
+    public function completeSale(CompleteSaleRequest $request)
     {
-        $validated = $request->validate([
-            'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1',
-            'items.*.unit_price' => 'required|numeric|min:0',
-            'items.*.unit_type' => 'nullable|string',
-            'items.*.discount' => 'nullable|numeric|min:0',
-
-            'payments' => 'required|array|min:1',
-            'payments.*.method' => 'required|in:cash,card,pos,credit,bank_transfer',
-            'payments.*.amount' => 'required|numeric|min:0',
-            'payments.*.reference' => 'nullable|string|max:100',
-
-            'customer_id' => 'nullable|exists:customers,id',
-            'customer_name' => 'nullable|string|max:255',
-            'discount_percentage' => 'nullable|numeric|min:0|max:100',
-            'discount_amount' => 'nullable|numeric|min:0',
-            'notes' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
 
         DB::beginTransaction();
 
@@ -88,7 +74,7 @@ class POSController extends Controller
             // 1. Lock and validate inventory atomically
             $productData = [];
 
-            foreach ($validated['items'] as $item) {
+            foreach ($validated['items'] as &$item) {
                 $product = Product::where('id', $item['product_id'])
                     ->lockForUpdate()
                     ->first();
@@ -97,70 +83,117 @@ class POSController extends Controller
                     throw new \Exception("Product not found");
                 }
 
-                if ($product->stock_quantity < $item['quantity']) {
-                    throw new \Exception("Insufficient stock for {$product->name}. Available: {$product->stock_quantity}, Requested: {$item['quantity']}");
+                // Resolve unit type and conversion factor
+                $unitTypeId = $item['product_unit_type_id'] ?? null;
+                $conversionFactor = 1;
+                $unitType = null;
+
+                if ($unitTypeId) {
+                    $unitType = ProductUnitType::find($unitTypeId);
+                    if ($unitType && $unitType->product_id === $product->id) {
+                        $conversionFactor = (float) $unitType->conversion_factor;
+                    }
+                } else {
+                    $conversionFactor = $item['conversion_factor'] ?? 1;
                 }
+
+                $quantityInBaseUnits = $item['quantity'] * $conversionFactor;
+
+                if ($product->stock_quantity < $quantityInBaseUnits) {
+                    $unitTypeName = $unitType ? $unitType->name : ($item['unit_type'] ?? 'piece');
+                    throw new \Exception("Insufficient stock for {$product->name}. Available: {$product->stock_quantity} pcs, Requested: {$item['quantity']} {$unitTypeName}(s)");
+                }
+
+                // Cashiers cannot modify prices — enforce the product's stored price
+                if (!in_array(auth()->user()->role, ['owner', 'manager'])) {
+                    if ($unitType) {
+                        $item['unit_price'] = (float) $unitType->selling_price;
+                    } else {
+                        $item['unit_price'] = $product->price;
+                    }
+                }
+
+                // Store resolved values for later use
+                $item['resolved_conversion_factor'] = $conversionFactor;
+                $item['resolved_unit_type_id'] = $unitTypeId;
+                $item['resolved_unit_type'] = $unitType;
 
                 // Cache product data
                 $productData[$product->id] = $product;
             }
+            unset($item);
 
-            // 2. Calculate totals
-            $subtotal = 0;
-            $totalCost = 0;
-            $totalProfit = 0;
+            // 2. Calculate totals using bcmath for monetary precision
+            $subtotal = '0';
+            $totalCost = '0';
+            $totalProfit = '0';
 
             foreach ($validated['items'] as $item) {
                 $product = $productData[$item['product_id']];
-                $lineTotal = $item['quantity'] * $item['unit_price'];
-                $lineDiscount = $item['discount'] ?? 0;
-                $lineNet = $lineTotal - $lineDiscount;
+                $conversionFactor = $item['resolved_conversion_factor'] ?? 1;
+                $lineTotal = bcmul((string) $item['quantity'], (string) $item['unit_price'], 2);
+                $lineDiscount = (string) ($item['discount'] ?? 0);
+                $lineNet = bcsub($lineTotal, $lineDiscount, 2);
 
-                $lineCost = $item['quantity'] * ($product->cost_price ?? 0);
-                $lineProfit = $lineNet - $lineCost;
+                $lineCost = bcmul((string) ($item['quantity'] * $conversionFactor), (string) ($product->cost_price ?? 0), 2);
+                $lineProfit = bcsub($lineNet, $lineCost, 2);
 
-                $subtotal += $lineNet;
-                $totalCost += $lineCost;
-                $totalProfit += $lineProfit;
+                $subtotal = bcadd($subtotal, $lineNet, 2);
+                $totalCost = bcadd($totalCost, $lineCost, 2);
+                $totalProfit = bcadd($totalProfit, $lineProfit, 2);
             }
 
-            $discountAmount = $validated['discount_amount'] ?? 0;
+            $discountAmount = (string) ($validated['discount_amount'] ?? 0);
             if (isset($validated['discount_percentage']) && $validated['discount_percentage'] > 0) {
-                $discountAmount = ($subtotal * $validated['discount_percentage']) / 100;
+                $discountAmount = bcdiv(bcmul($subtotal, (string) $validated['discount_percentage'], 2), '100', 2);
             }
 
-            $grandTotal = $subtotal - $discountAmount;
-            $profitMargin = $grandTotal > 0 ? ($totalProfit / $grandTotal) * 100 : 0;
+            $grandTotal = bcsub($subtotal, $discountAmount, 2);
+            $profitMargin = bccomp($grandTotal, '0', 2) > 0
+                ? (float) bcmul(bcdiv($totalProfit, $grandTotal, 4), '100', 2)
+                : 0;
 
             // 3. Validate payment total
-            $totalPaid = array_sum(array_column($validated['payments'], 'amount'));
+            $totalPaid = (string) array_sum(array_column($validated['payments'], 'amount'));
 
-            // Allow credit sales (payment can be less than total)
+            // Separate credit vs non-credit payments
             $hasCreditPayment = collect($validated['payments'])->contains('method', 'credit');
+            $actualPaid = (string) collect($validated['payments'])
+                ->filter(fn($p) => $p['method'] !== 'credit')
+                ->sum('amount');
 
-            if (!$hasCreditPayment && $totalPaid < $grandTotal) {
+            if (!$hasCreditPayment && bccomp($totalPaid, $grandTotal, 2) < 0) {
                 throw new \Exception("Payment amount ({$totalPaid}) is less than total ({$grandTotal})");
+            }
+
+            // Determine sale type: if any credit payment, the sale is a credit sale
+            $saleType = $hasCreditPayment ? 'credit' : ($validated['payments'][0]['method'] ?? 'cash');
+
+            // Determine payment status based on actual money collected (excluding credit)
+            if (bccomp($actualPaid, $grandTotal, 2) >= 0) {
+                $paymentStatus = 'paid';
+            } elseif (bccomp($actualPaid, '0', 2) > 0) {
+                $paymentStatus = 'partially_paid';
+            } else {
+                $paymentStatus = 'unpaid';
             }
 
             // 4. Create sale
             $sale = Sale::create([
-                'sale_number' => $this->generateSaleNumber(),
+                'sale_number' => Sale::generateSaleNumber(),
                 'cashier_id' => auth()->id(),
-                'user_id' => auth()->id(),
-                'customer_id' => $validated['customer_id'] ?? null,
                 'customer_name' => $validated['customer_name'] ?? null,
                 'sale_date' => now(),
                 'subtotal' => $subtotal,
                 'discount_percentage' => $validated['discount_percentage'] ?? 0,
                 'discount_amount' => $discountAmount,
                 'total_amount' => $grandTotal,
-                'amount_paid' => $totalPaid, // Record total amount paid for receipt
-                'amount_due' => max(0, $grandTotal - $totalPaid),
+                'amount_paid' => $actualPaid,
+                'amount_due' => max(0, (float) bcsub($grandTotal, $actualPaid, 2)),
                 'cost_of_goods_sold' => $totalCost,
                 'gross_profit' => $totalProfit,
-                'profit_margin' => $profitMargin,
-                'payment_status' => $totalPaid >= $grandTotal ? 'paid' : 'unpaid',
-                'sale_type' => $validated['payments'][0]['method'] ?? 'cash', // Primary payment method
+                'payment_status' => $paymentStatus,
+                'sale_type' => $saleType,
                 'status' => 'completed',
                 'notes' => $validated['notes'] ?? null,
             ]);
@@ -168,41 +201,43 @@ class POSController extends Controller
             // 5. Create sale items and deduct stock atomically
             foreach ($validated['items'] as $item) {
                 $product = $productData[$item['product_id']];
+                $conversionFactor = $item['resolved_conversion_factor'] ?? 1;
+                $unitType = $item['resolved_unit_type'] ?? null;
+                $quantityInBaseUnits = $item['quantity'] * $conversionFactor;
 
-                $lineTotal = $item['quantity'] * $item['unit_price'];
-                $lineDiscount = $item['discount'] ?? 0;
-                $lineNet = $lineTotal - $lineDiscount;
-                $lineCost = $item['quantity'] * ($product->cost_price ?? 0);
-                $lineProfit = $lineNet - $lineCost;
+                $lineTotal = bcmul((string) $item['quantity'], (string) $item['unit_price'], 2);
+                $lineDiscount = (string) ($item['discount'] ?? 0);
+                $lineNet = bcsub($lineTotal, $lineDiscount, 2);
+                $lineCost = bcmul((string) $quantityInBaseUnits, (string) ($product->cost_price ?? 0), 2);
+                $lineProfit = bcsub($lineNet, $lineCost, 2);
 
                 // Create sale item
                 SaleItem::create([
                     'sale_id' => $sale->id,
                     'product_id' => $product->id,
+                    'product_unit_type_id' => $item['resolved_unit_type_id'] ?? null,
                     'quantity' => $item['quantity'],
+                    'unit_type' => $unitType ? $unitType->name : ($item['unit_type'] ?? $product->unit_type ?? 'piece'),
+                    'conversion_factor' => $conversionFactor,
                     'unit_price' => $item['unit_price'],
-                    'line_total' => $lineTotal,
-                    'unit_type' => $item['unit_type'] ?? $product->unit_type ?? 'piece',
+                    'line_total' => $lineNet,
                     'unit_cost' => $product->cost_price ?? 0,
+                    'discount_percent' => (bccomp($lineDiscount, '0', 2) > 0 && bccomp($lineTotal, '0', 2) > 0)
+                        ? (float) bcmul(bcdiv($lineDiscount, $lineTotal, 4), '100', 2)
+                        : 0,
                     'line_cost' => $lineCost,
                     'line_profit' => $lineProfit,
-                    'discount' => $lineDiscount,
-                    'cost_price' => $product->cost_price ?? 0,
-                    'profit' => $lineProfit,
                 ]);
 
-                // Deduct stock atomically
-                Product::where('id', $product->id)
-                    ->decrement('stock_quantity', $item['quantity']);
-
-                // Create stock movement record
-                $previousStock = $product->stock_quantity + $item['quantity']; // Before deduction
-                $newStock = $product->stock_quantity; // After deduction (already decremented above)
+                // Deduct stock in base units within the same lock scope
+                $previousStock = $product->stock_quantity;
+                $newStock = $previousStock - $quantityInBaseUnits;
+                $product->update(['stock_quantity' => $newStock]);
 
                 StockMovement::create([
                     'product_id' => $product->id,
                     'type' => 'sale',
-                    'quantity' => -$item['quantity'],
+                    'quantity' => -$quantityInBaseUnits,
                     'previous_stock' => $previousStock,
                     'new_stock' => $newStock,
                     'reference_type' => Sale::class,
@@ -224,6 +259,8 @@ class POSController extends Controller
 
             DB::commit();
 
+            AuditLog::log('sale.create', $sale, null, $sale->toArray(), "POS Sale {$sale->sale_number}");
+
             Log::info('POS Sale completed', [
                 'sale_id' => $sale->id,
                 'sale_number' => $sale->sale_number,
@@ -234,7 +271,7 @@ class POSController extends Controller
             return response()->json([
                 'message' => 'Sale completed successfully',
                 'sale' => $sale->load(['items.product', 'payments', 'user']),
-                'change' => max(0, $totalPaid - $grandTotal),
+                'change' => max(0, (float) bcsub($totalPaid, $grandTotal, 2)),
             ]);
 
         } catch (\Exception $e) {
@@ -260,6 +297,13 @@ class POSController extends Controller
     {
         $validated = $request->validate([
             'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|integer|exists:products,id',
+            'items.*.quantity' => 'required|numeric|min:0.01',
+            'items.*.unit_price' => 'required|numeric|min:0',
+            'items.*.unit_type' => 'nullable|string',
+            'items.*.product_unit_type_id' => 'nullable|integer',
+            'items.*.conversion_factor' => 'nullable|numeric|min:0.01',
+            'items.*.discount' => 'nullable|numeric|min:0',
             'discount_percentage' => 'nullable|numeric|min:0|max:100',
             'discount_amount' => 'nullable|numeric|min:0',
             'notes' => 'nullable|string',
@@ -279,7 +323,7 @@ class POSController extends Controller
             return response()->json([
                 'message' => 'Cart held successfully',
                 'held_cart' => $heldCart,
-            ]);
+            ], 201);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -362,27 +406,32 @@ class POSController extends Controller
         DB::beginTransaction();
 
         try {
-            // Restore stock for each item
+            // Restore stock for each item within lock scope
             foreach ($sale->items as $item) {
-                Product::where('id', $item->product_id)
-                    ->increment('stock_quantity', $item->quantity);
+                $product = Product::where('id', $item->product_id)
+                    ->lockForUpdate()
+                    ->first();
 
-                // Create stock movement record
-                $product = Product::find($item->product_id);
-                $previousStock = $product->stock_quantity - $item->quantity; // Before restoration
-                $newStock = $product->stock_quantity; // After restoration
+                if ($product) {
+                    $conversionFactor = $item->conversion_factor ?? 1;
+                    $restockQuantity = $item->quantity * $conversionFactor;
 
-                StockMovement::create([
-                    'product_id' => $item->product_id,
-                    'type' => 'void',
-                    'quantity' => $item->quantity,
-                    'previous_stock' => $previousStock,
-                    'new_stock' => $newStock,
-                    'reference_type' => Sale::class,
-                    'reference_id' => $sale->id,
-                    'user_id' => auth()->id(),
-                    'notes' => "Sale voided: {$validated['reason']}",
-                ]);
+                    $previousStock = $product->stock_quantity;
+                    $newStock = $previousStock + $restockQuantity;
+                    $product->update(['stock_quantity' => $newStock]);
+
+                    StockMovement::create([
+                        'product_id' => $item->product_id,
+                        'type' => 'void',
+                        'quantity' => $restockQuantity,
+                        'previous_stock' => $previousStock,
+                        'new_stock' => $newStock,
+                        'reference_type' => Sale::class,
+                        'reference_id' => $sale->id,
+                        'user_id' => auth()->id(),
+                        'notes' => "Sale voided: {$validated['reason']}",
+                    ]);
+                }
             }
 
             // Mark sale as voided
@@ -394,6 +443,8 @@ class POSController extends Controller
             ]);
 
             DB::commit();
+
+            AuditLog::log('sale.void', $sale, null, null, "Sale {$sale->sale_number} voided: {$validated['reason']}");
 
             Log::warning('Sale voided', [
                 'sale_id' => $sale->id,
@@ -428,14 +479,4 @@ class POSController extends Controller
         return response()->json($sale);
     }
 
-    /**
-     * Generate unique sale number
-     */
-    private function generateSaleNumber(): string
-    {
-        $date = now()->format('Ymd');
-        $count = Sale::whereDate('created_at', today())->count() + 1;
-
-        return sprintf('SALE-%s-%04d', $date, $count);
-    }
 }

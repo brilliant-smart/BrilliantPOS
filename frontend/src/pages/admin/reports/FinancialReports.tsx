@@ -7,12 +7,13 @@ import { Label } from '@/components/ui/label';
 import { reportsApi } from '@/app/api/reports';
 import { toast } from 'sonner';
 import { DatePicker } from '@/components/DatePicker';
+import { todayLocal } from '@/utils/date';
 
 export default function FinancialReports() {
   const [loading, setLoading] = useState(false);
   const [dateRange, setDateRange] = useState({
-    start_date: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
-    end_date: new Date().toISOString().split('T')[0],
+    start_date: `${new Date().getFullYear()}-01-01`,
+    end_date: todayLocal(),
   });
   const [profitLoss, setProfitLoss] = useState<any>(null);
   const [variance, setVariance] = useState<any[]>([]);
@@ -44,7 +45,7 @@ export default function FinancialReports() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Financial Reports</h1>
@@ -89,25 +90,25 @@ export default function FinancialReports() {
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">Total Revenue</p>
                 <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                  ₦{parseFloat(profitLoss.sales?.total_revenue || 0).toLocaleString()}
+                  ₦{parseFloat(profitLoss.revenue?.total_revenue || 0).toLocaleString()}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {profitLoss.sales?.total_sales || 0} sales
+                  {profitLoss.revenue?.total_sales_count || 0} sales
                 </p>
               </div>
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">Total COGS</p>
                 <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                  ₦{parseFloat(profitLoss.sales?.total_cogs || 0).toLocaleString()}
+                  ₦{parseFloat(profitLoss.costs?.cost_of_goods_sold || 0).toLocaleString()}
                 </p>
               </div>
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">Gross Profit</p>
                 <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                  ₦{parseFloat(profitLoss.sales?.total_profit || 0).toLocaleString()}
+                  ₦{parseFloat(profitLoss.profit?.gross_profit || 0).toLocaleString()}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Margin: {profitLoss.sales?.profit_margin || 0}%
+                  Margin: {profitLoss.profit?.profit_margin_percent || 0}%
                 </p>
               </div>
             </div>
@@ -138,7 +139,7 @@ export default function FinancialReports() {
                     </div>
                     <div className="text-right">
                       <p className="font-bold text-red-600 dark:text-red-400">
-                        {item.variance_quantity} units
+                        {item.variance} units
                       </p>
                       <p className="text-sm text-muted-foreground">
                         ₦{parseFloat(item.variance_value || 0).toLocaleString()}
@@ -181,7 +182,7 @@ export default function FinancialReports() {
                     </div>
                     <div className="text-right">
                       <p className="font-medium text-orange-600 dark:text-orange-400">
-                        {item.days_to_expiry} days left
+                        {item.days_until_expiry} days left
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {item.stock_quantity} units | ₦{parseFloat(item.stock_value || 0).toLocaleString()}

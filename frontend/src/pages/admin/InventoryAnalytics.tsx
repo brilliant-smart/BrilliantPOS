@@ -6,7 +6,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
 import { CalendarIcon, Download, TrendingUp, Package, AlertTriangle, DollarSign, ArrowUpDown, Loader2 } from "lucide-react";
-import Swal from 'sweetalert2';
+import { toast } from "sonner";
 import { getDashboardStats, getMovementReport, getTurnoverRate, exportReport, type DashboardStats, type MovementReport, type TurnoverRate } from "@/app/api/inventoryAnalytics";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -118,31 +118,21 @@ export default function InventoryAnalytics() {
       link.remove();
       window.URL.revokeObjectURL(url);
 
-      Swal.fire({
-        title: 'Export Complete',
-        text: 'CSV report has been downloaded.',
-        icon: 'success',
-        confirmButtonColor: '#3b82f6'
-      });
+      toast.success('CSV report has been downloaded.');
     } catch (error) {
       console.error("Export failed:", error);
-      Swal.fire({
-        title: 'Export Failed',
-        text: 'Failed to export report. Please try again.',
-        icon: 'error',
-        confirmButtonColor: '#3b82f6'
-      });
+      toast.error('Failed to export report. Please try again.');
     } finally {
       setExporting(false);
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Inventory Analytics</h1>
-          <p className="text-muted-foreground mt-1">Comprehensive insights into your inventory performance</p>
+          <p className="text-muted-foreground dark:text-muted-foreground/80 mt-1">Comprehensive insights into your inventory performance</p>
         </div>
         <Button variant="outline" onClick={handleExport} disabled={exporting}>
           <Download className="h-4 w-4 mr-2" />
@@ -157,7 +147,7 @@ export default function InventoryAnalytics() {
             <span className="text-sm font-medium">Date Range:</span>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className={cn("justify-start text-left font-normal", !dateRange.start && "text-muted-foreground")}>
+                <Button variant="outline" className={cn("justify-start text-left font-normal", !dateRange.start && "text-muted-foreground dark:text-muted-foreground/80")}>
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {dateRange.start ? format(dateRange.start, "PPP") : "Start date"}
                 </Button>
@@ -166,10 +156,10 @@ export default function InventoryAnalytics() {
                 <Calendar mode="single" selected={dateRange.start} onSelect={(date) => setDateRange({ ...dateRange, start: date })} initialFocus />
               </PopoverContent>
             </Popover>
-            <span className="text-sm text-muted-foreground">to</span>
+            <span className="text-sm text-muted-foreground dark:text-muted-foreground/80">to</span>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className={cn("justify-start text-left font-normal", !dateRange.end && "text-muted-foreground")}>
+                <Button variant="outline" className={cn("justify-start text-left font-normal", !dateRange.end && "text-muted-foreground dark:text-muted-foreground/80")}>
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {dateRange.end ? format(dateRange.end, "PPP") : "End date"}
                 </Button>
@@ -202,22 +192,22 @@ export default function InventoryAnalytics() {
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium">Total Products</CardTitle>
-                    <Package className="h-4 w-4 text-muted-foreground" />
+                    <Package className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{dashboardData.overview.total_products}</div>
-                    <p className="text-xs text-muted-foreground mt-1">{dashboardData.overview.total_stock_units} units in stock</p>
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">{dashboardData.overview.total_stock_units} units in stock</p>
                   </CardContent>
                 </Card>
 
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium">Inventory Value</CardTitle>
-                    <DollarSign className="h-4 w-4 text-muted-foreground" />
+                    <DollarSign className="h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{formatCurrency(dashboardData.overview.total_stock_value)}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Total stock worth</p>
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">Total stock worth</p>
                   </CardContent>
                 </Card>
 
@@ -228,7 +218,7 @@ export default function InventoryAnalytics() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{dashboardData.stock_status.low_stock}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Need restocking</p>
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">Need restocking</p>
                   </CardContent>
                 </Card>
 
@@ -239,7 +229,7 @@ export default function InventoryAnalytics() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-red-600 dark:text-red-400">{dashboardData.stock_status.out_of_stock}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Urgent action needed</p>
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">Urgent action needed</p>
                   </CardContent>
                 </Card>
               </div>
@@ -253,15 +243,15 @@ export default function InventoryAnalytics() {
                   <div className="grid grid-cols-3 gap-4">
                     <div className="text-center p-4 bg-green-50 dark:bg-green-950/30 rounded-lg">
                       <div className="text-3xl font-bold text-green-600 dark:text-green-400">{dashboardData.stock_status.in_stock}</div>
-                      <div className="text-sm text-muted-foreground mt-1">In Stock</div>
+                      <div className="text-sm text-muted-foreground dark:text-muted-foreground/80 mt-1">In Stock</div>
                     </div>
                     <div className="text-center p-4 bg-yellow-50 dark:bg-yellow-950/30 rounded-lg">
                       <div className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{dashboardData.stock_status.low_stock}</div>
-                      <div className="text-sm text-muted-foreground mt-1">Low Stock</div>
+                      <div className="text-sm text-muted-foreground dark:text-muted-foreground/80 mt-1">Low Stock</div>
                     </div>
                     <div className="text-center p-4 bg-red-50 dark:bg-red-950/30 rounded-lg">
                       <div className="text-3xl font-bold text-red-600 dark:text-red-400">{dashboardData.stock_status.out_of_stock}</div>
-                      <div className="text-sm text-muted-foreground mt-1">Out of Stock</div>
+                      <div className="text-sm text-muted-foreground dark:text-muted-foreground/80 mt-1">Out of Stock</div>
                     </div>
                   </div>
                 </CardContent>
@@ -282,9 +272,9 @@ export default function InventoryAnalytics() {
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                       {Object.entries(dashboardData.movement_summary.by_type).map(([type, data]) => (
                         <div key={type} className="text-center p-3 bg-muted rounded-lg">
-                          <div className="text-sm font-medium capitalize text-muted-foreground">{type}</div>
+                          <div className="text-sm font-medium capitalize text-muted-foreground dark:text-muted-foreground/80">{type}</div>
                           <div className="text-xl font-bold mt-1">{data.count}</div>
-                          <div className="text-xs text-muted-foreground mt-1">
+                          <div className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                             {data.total_quantity > 0 ? "+" : ""}
                             {data.total_quantity} units
                           </div>
@@ -389,7 +379,7 @@ export default function InventoryAnalytics() {
               )}
             </>
           ) : (
-            <div className="text-center py-12 text-muted-foreground">No data available</div>
+            <div className="text-center py-12 text-muted-foreground dark:text-muted-foreground/80">No data available</div>
           )}
         </TabsContent>
 
@@ -451,13 +441,13 @@ export default function InventoryAnalytics() {
                         <TableCell className="text-right">{movement.previous_quantity}</TableCell>
                         <TableCell className="text-right">{movement.new_quantity}</TableCell>
                         <TableCell className="text-sm">{movement.user_name}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{movement.notes || "-"}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground dark:text-muted-foreground/80">{movement.notes || "-"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               ) : (
-                <div className="text-center py-12 text-muted-foreground">No movements found</div>
+                <div className="text-center py-12 text-muted-foreground dark:text-muted-foreground/80">No movements found</div>
               )}
             </CardContent>
           </Card>
@@ -493,7 +483,7 @@ export default function InventoryAnalytics() {
               ) : turnoverData ? (
                 <>
                   <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
-                    <div className="text-sm text-muted-foreground">Average Turnover Rate</div>
+                    <div className="text-sm text-muted-foreground dark:text-muted-foreground/80">Average Turnover Rate</div>
                     <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">{turnoverData.average_turnover}x per year</div>
                   </div>
                   <Table>
@@ -511,7 +501,7 @@ export default function InventoryAnalytics() {
                       {turnoverData.products.slice(0, 20).map((product) => (
                         <TableRow key={product.product_id}>
                           <TableCell className="font-medium">{product.product_name}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{product.sku || "-"}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground dark:text-muted-foreground/80">{product.sku || "-"}</TableCell>
                           <TableCell className="text-right">{product.units_sold}</TableCell>
                           <TableCell className="text-right">{product.current_stock}</TableCell>
                           <TableCell className="text-right font-semibold">
@@ -527,7 +517,7 @@ export default function InventoryAnalytics() {
                   </Table>
                 </>
               ) : (
-                <div className="text-center py-12 text-muted-foreground">No data available</div>
+                <div className="text-center py-12 text-muted-foreground dark:text-muted-foreground/80">No data available</div>
               )}
             </CardContent>
           </Card>

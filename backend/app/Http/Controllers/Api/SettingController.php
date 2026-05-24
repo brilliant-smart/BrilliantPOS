@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Setting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -31,12 +32,14 @@ class SettingController extends Controller
         $request->validate([
             'settings' => 'required|array',
             'settings.*.key' => 'required|string|exists:settings,key',
-            'settings.*.value' => 'required',
+            'settings.*.value' => 'nullable',
         ]);
 
         foreach ($request->settings as $item) {
             Setting::set($item['key'], $item['value']);
         }
+
+        AuditLog::logAction('settings.update', 'Setting', null, null, $request->settings, 'Settings updated');
 
         Cache::forget('settings.all');
 

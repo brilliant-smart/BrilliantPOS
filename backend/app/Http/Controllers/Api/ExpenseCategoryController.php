@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\ExpenseCategory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -60,6 +61,8 @@ class ExpenseCategoryController extends Controller
             'is_active' => true,
         ]);
 
+        AuditLog::log('expense_category.create', $category, null, $category->toArray(), "Expense category {$category->name} created");
+
         return response()->json([
             'message' => 'Category created successfully',
             'category' => $category
@@ -103,6 +106,8 @@ class ExpenseCategoryController extends Controller
 
         $expenseCategory->update($updateData);
 
+        AuditLog::log('expense_category.update', $expenseCategory, null, $expenseCategory->toArray(), "Expense category {$expenseCategory->name} updated");
+
         return response()->json([
             'message' => 'Category updated successfully',
             'category' => $expenseCategory
@@ -120,6 +125,8 @@ class ExpenseCategoryController extends Controller
                 'message' => 'Cannot delete category with existing expenses'
             ], 400);
         }
+
+        AuditLog::log('expense_category.delete', $expenseCategory, null, null, "Expense category {$expenseCategory->name} deleted");
 
         $expenseCategory->delete();
 

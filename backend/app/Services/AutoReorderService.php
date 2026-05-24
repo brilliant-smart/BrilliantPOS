@@ -95,9 +95,9 @@ class AutoReorderService
             PurchaseOrderItem::create([
                 'purchase_order_id' => $po->id,
                 'product_id' => $product->id,
-                'quantity' => $quantity,
-                'unit_price' => $product->last_purchase_price ?? $product->cost_price,
-                'total_price' => $quantity * ($product->last_purchase_price ?? $product->cost_price),
+                'quantity_ordered' => $quantity,
+                'unit_cost' => $product->last_purchase_price ?? $product->cost_price,
+                'line_total' => $quantity * ($product->last_purchase_price ?? $product->cost_price),
             ]);
 
             // Update log

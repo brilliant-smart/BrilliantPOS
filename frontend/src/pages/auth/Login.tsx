@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2, Eye, EyeOff } from "lucide-react";
 import logo from "@/assets/logo.png";
 
 const Login = () => {
@@ -31,6 +31,7 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,7 +90,7 @@ const Login = () => {
           <h1 className="text-2xl font-semibold text-center text-foreground mb-2 font-display">
             Brilliant POS
           </h1>
-          <p className="text-sm text-center text-muted-foreground mb-6">
+          <p className="text-sm text-center text-muted-foreground dark:text-muted-foreground/80 mb-6">
             Smart Retail & Inventory System
           </p>
 
@@ -113,7 +114,7 @@ const Login = () => {
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="bg-background border-input text-foreground placeholder:text-muted-foreground focus:ring-ring"
+                className="bg-background border-input text-foreground placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/80 focus:ring-ring"
                 disabled={isLoading}
               />
             </div>
@@ -123,15 +124,25 @@ const Login = () => {
               <Label htmlFor="password" className="text-foreground font-body">
                 Password
               </Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="bg-background border-input text-foreground placeholder:text-muted-foreground focus:ring-ring"
-                disabled={isLoading}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="bg-background border-input text-foreground placeholder:text-muted-foreground dark:placeholder:text-muted-foreground/80 focus:ring-ring pr-10"
+                  disabled={isLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground dark:text-muted-foreground/80 hover:text-foreground"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
 
             {/* Login Button */}
@@ -153,7 +164,7 @@ const Login = () => {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-muted-foreground text-xs mt-6 font-body">
+        <p className="text-center text-muted-foreground dark:text-muted-foreground/80 text-xs mt-6 font-body">
           &copy; 2025 - 2026 Brilliant Smart. All rights reserved | +234 803 462 5258 | Powered by Digital Technologies
         </p>
       </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { UsePosCartReturn } from '@/hooks/usePosCart';
 import { UsePosPaymentReturn, PaymentMethod } from '@/hooks/usePosPayment';
 import {
@@ -17,7 +17,18 @@ import { Smartphone, Building2, UserCheck, X } from 'lucide-react';
 import { Banknote } from 'lucide-react';
 import { toast } from 'sonner';
 import { posApi } from '@/app/api/pos';
-import Swal from 'sweetalert2';
+import { useAuth } from '@/app/auth/AuthContext';
+import { isOwner, isManager } from '@/app/auth/guards';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface POSPaymentDrawerProps {
   open: boolean;
@@ -41,25 +52,47 @@ export default function POSPaymentDrawer({
   payment,
   customerName,
 }: POSPaymentDrawerProps) {
+  const { user } = useAuth();
+  const canUseCredit = isOwner(user) || isManager(user);
+  const receiptPromptEnabled = localStorage.getItem('brilliant_pos_receipt_prompt') !== '0';
+  const visiblePaymentMethods = paymentMethods.filter(
+    (m) => m.value !== 'credit' || canUseCredit
+  );
+
   // Auto-select POS Terminal as default (most common in Nigeria)
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('pos');
   const [amount, setAmount] = useState('');
   const [reference, setReference] = useState('');
   const [completing, setCompleting] = useState(false);
-  
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [confirmData, setConfirmData] = useState<{
+    totalPaid: number;
+    change: number;
+    paymentAmount: number;
+    autoAddedPayment: boolean;
+    selectedMethod: PaymentMethod;
+    reference: string;
+  } | null>(null);
+  const [showSaleResult, setShowSaleResult] = useState(false);
+  const [saleResult, setSaleResult] = useState<{
+    saleNumber: string;
+    total: number;
+    change: number;
+    saleId: number;
+  } | null>(null);
+
   // Discount state
   const [discountType, setDiscountType] = useState<'percentage' | 'amount'>('percentage');
   const [discountValue, setDiscountValue] = useState('');
 
-  // Auto-focus and keyboard shortcuts
+  // Reset state when drawer opens
   useEffect(() => {
     if (open) {
-      // Auto-select POS Terminal
       setSelectedMethod('pos');
       setAmount('');
       setReference('');
       setDiscountValue('');
-      
+
       // Load existing discount from cart if any
       if (cart.discountPercentage > 0) {
         setDiscountType('percentage');
@@ -67,53 +100,34 @@ export default function POSPaymentDrawer({
       } else if (cart.discountAmount > 0) {
         setDiscountType('amount');
         setDiscountValue(cart.discountAmount.toString());
+      } else {
+        setDiscountType('percentage');
       }
-      
-      const handleKeyPress = (e: KeyboardEvent) => {
-        // Don't interfere with input fields
-        if (e.target instanceof HTMLInputElement) return;
-        
-        // Method selection hotkeys
-        if (e.key.toLowerCase() === 'p') setSelectedMethod('pos');
-        if (e.key.toLowerCase() === 't') setSelectedMethod('bank_transfer');
-        if (e.key.toLowerCase() === 'c') setSelectedMethod('cash');
-        if (e.key.toLowerCase() === 'r') setSelectedMethod('credit');
-        
-        // Enter to complete sale (exact payment)
-        if (e.key === 'Enter' && payment.payments.length === 0) {
-          e.preventDefault();
-          handleCompleteSale();
-        }
-      };
-
-      window.addEventListener('keydown', handleKeyPress);
-      return () => window.removeEventListener('keydown', handleKeyPress);
     }
-  }, [open, payment.payments.length]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleAddPayment = () => {
-    const amountNum = parseFloat(amount);
-    
-    if (isNaN(amountNum) || amountNum <= 0) {
-      toast.error('Please enter a valid amount');
-      return;
+  // Sync discount changes back to cart so displayed totals stay consistent
+  useEffect(() => {
+    if (!open) return;
+    const value = parseFloat(discountValue);
+    if (discountType === 'percentage' && !isNaN(value) && value > 0) {
+      cart.applyGlobalDiscount(value, 0);
+    } else if (discountType === 'amount' && !isNaN(value) && value > 0) {
+      cart.applyGlobalDiscount(0, value);
+    } else if (discountValue === '' || discountValue === '0') {
+      cart.applyGlobalDiscount(0, 0);
     }
+  }, [discountType, discountValue, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    payment.addPayment(selectedMethod, amountNum, reference);
-    setAmount('');
-    setReference('');
-    toast.success(`₦${amountNum.toLocaleString()} ${selectedMethod} payment added`);
-  };
-
-  const handleCompleteSale = async () => {
+  const handleCompleteSale = useCallback(() => {
     // Calculate the payment amount to use
     let paymentAmount: number;
     let autoAddedPayment = false;
-    
+
     // If no payments added, determine amount to use
     if (payment.payments.length === 0) {
       const amountNum = parseFloat(amount);
-      
+
       // If amount field is empty or invalid, default to exact total
       // Otherwise use the entered amount
       if (!amount || amount.trim() === '' || isNaN(amountNum) || amountNum <= 0) {
@@ -121,12 +135,11 @@ export default function POSPaymentDrawer({
       } else {
         paymentAmount = amountNum;
       }
-      
+
       // Validate payment amount (except for credit)
       if (selectedMethod !== 'credit') {
         // For cash, allow overpayment (change will be calculated)
         if (selectedMethod === 'cash') {
-          // Cash can be any amount >= total
           if (paymentAmount < cart.grandTotal) {
             toast.error(`Payment amount (₦${paymentAmount.toLocaleString()}) is less than total (₦${cart.grandTotal.toLocaleString()})`);
             return;
@@ -139,53 +152,83 @@ export default function POSPaymentDrawer({
           }
         }
       }
-      
-      // Auto-add payment
-      payment.addPayment(selectedMethod, paymentAmount, reference);
+
       autoAddedPayment = true;
+    } else {
+      paymentAmount = 0;
     }
 
     // Calculate totals for confirmation
-    // If we just auto-added a payment, calculate manually to avoid React state batching issue
     let totalPaid: number;
     if (autoAddedPayment) {
-      // Calculate manually including the just-added payment
+      // Calculate manually including the would-be-added payment
       const existingTotal = payment.payments.reduce((sum, p) => sum + p.amount, 0);
       totalPaid = existingTotal + paymentAmount;
     } else {
       // Use the hook's calculated value
       totalPaid = payment.totalPaid;
     }
-    
+
     const change = Math.max(0, totalPaid - cart.grandTotal);
 
-    // Close the payment drawer modal before showing Swal to prevent blocking
-    onClose();
-
-    // Confirm
-    const result = await Swal.fire({
-      title: 'Complete Sale?',
-      html: `
-        <div class="text-left">
-          <p class="mb-2"><strong>Total:</strong> ₦${cart.grandTotal.toLocaleString()}</p>
-          <p class="mb-2"><strong>Paid:</strong> ₦${totalPaid.toLocaleString()}</p>
-          ${change > 0 ? `<p class="mb-2 text-green-600"><strong>Change:</strong> ₦${change.toLocaleString()}</p>` : ''}
-        </div>
-      `,
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonText: 'Complete Sale',
-      cancelButtonText: 'Cancel',
-      confirmButtonColor: '#16a34a',
+    // Store confirmation data and show dialog
+    setConfirmData({
+      totalPaid,
+      change,
+      paymentAmount,
+      autoAddedPayment,
+      selectedMethod,
+      reference,
     });
+    setShowCompleteConfirm(true);
+  }, [amount, selectedMethod, reference, payment.payments, payment.totalPaid, cart.grandTotal]);
 
-    if (!result.isConfirmed) {
-      // If cancelled and auto-added payment, remove it
-      if (autoAddedPayment) {
-        payment.clearPayments();
+  // Keyboard shortcuts — only when drawer is open
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Don't interfere with input fields
+      if (e.target instanceof HTMLInputElement) return;
+
+      // Method selection hotkeys
+      if (e.key.toLowerCase() === 'p') setSelectedMethod('pos');
+      if (e.key.toLowerCase() === 't') setSelectedMethod('bank_transfer');
+      if (e.key.toLowerCase() === 'c') setSelectedMethod('cash');
+      if (e.key.toLowerCase() === 'r' && canUseCredit) setSelectedMethod('credit');
+
+      // Enter to complete sale (exact payment)
+      if (e.key === 'Enter' && payment.payments.length === 0) {
+        e.preventDefault();
+        handleCompleteSale();
       }
-      // Don't need to reopen modal - user cancelled
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [open, canUseCredit, payment.payments.length, handleCompleteSale]);
+
+  const handleAddPayment = () => {
+    const amountNum = parseFloat(amount);
+
+    if (isNaN(amountNum) || amountNum <= 0) {
+      toast.error('Please enter a valid amount');
       return;
+    }
+
+    payment.addPayment(selectedMethod, amountNum, reference);
+    setAmount('');
+    setReference('');
+    toast.success(`₦${amountNum.toLocaleString()} ${selectedMethod} payment added`);
+  };
+
+  const handleConfirmCompleteSale = async () => {
+    if (!confirmData || completing) return;
+    setShowCompleteConfirm(false);
+
+    // Add payment if auto-added
+    if (confirmData.autoAddedPayment) {
+      payment.addPayment(confirmData.selectedMethod, confirmData.paymentAmount, confirmData.reference);
     }
 
     setCompleting(true);
@@ -194,33 +237,28 @@ export default function POSPaymentDrawer({
       // Build payments array
       // If we auto-added a payment, include it manually (state might not have updated yet)
       let paymentsToSend;
-      if (autoAddedPayment) {
+      if (confirmData.autoAddedPayment) {
         paymentsToSend = [
           ...payment.payments,
           {
-            method: selectedMethod,
-            amount: paymentAmount,
-            reference: reference || undefined,
+            method: confirmData.selectedMethod,
+            amount: confirmData.paymentAmount,
+            reference: confirmData.reference || undefined,
           }
         ];
       } else {
         paymentsToSend = payment.payments;
       }
-      
-      // Calculate discount from the discount inputs
-      const calculatedDiscountPercentage = discountType === 'percentage' && discountValue 
-        ? parseFloat(discountValue) 
-        : undefined;
-      const calculatedDiscountAmount = discountType === 'amount' && discountValue 
-        ? parseFloat(discountValue) 
-        : undefined;
-      
+
+      // Use the cart's discount values (single source of truth)
       const saleData = {
         items: cart.items.map(item => ({
           product_id: item.product_id,
           quantity: item.quantity,
           unit_price: item.unit_price,
           unit_type: item.unit_type,
+          product_unit_type_id: item.unit_type_id,
+          conversion_factor: item.conversion_factor,
           discount: item.discount,
         })),
         payments: paymentsToSend.map(p => ({
@@ -229,44 +267,31 @@ export default function POSPaymentDrawer({
           reference: p.reference,
         })),
         customer_name: customerName || undefined,
-        discount_percentage: calculatedDiscountPercentage,
-        discount_amount: calculatedDiscountAmount,
+        discount_percentage: cart.discountPercentage || undefined,
+        discount_amount: cart.discountAmount || undefined,
       };
 
       const response = await posApi.completeSale(saleData);
 
-      // Success
-      await Swal.fire({
-        title: 'Sale Completed!',
-        html: `
-          <div class="text-left">
-            <p class="mb-2"><strong>Sale #:</strong> ${response.sale.sale_number}</p>
-            <p class="mb-2"><strong>Total:</strong> ₦${cart.grandTotal.toLocaleString()}</p>
-            ${response.change > 0 ? `<p class="text-green-600 text-lg font-bold">Change: ₦${response.change.toLocaleString()}</p>` : ''}
-          </div>
-        `,
-        icon: 'success',
-        confirmButtonText: 'Print Receipt',
-        showCancelButton: true,
-        cancelButtonText: 'Close',
-      }).then((result) => {
-        if (result.isConfirmed) {
-          // Open thermal receipt in new window (80mm POS printer optimized)
-          const token = localStorage.getItem('brilliant_auth_token');
-          const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-          window.open(`${backendUrl}/admin/receipts/${response.sale.id}?token=${token}`, '_blank');
-        }
-      });
+      // Show toast first — guaranteed visible even if AlertDialog has z-index issues with Sheet
+      toast.success(`Sale ${response.sale.sale_number} completed — ₦${cart.grandTotal.toLocaleString()}`);
 
-      // Clear cart and close
-      cart.clearCart();
-      payment.clearPayments();
+      // Close the payment drawer BEFORE showing the result dialog
+      // This avoids nested-modal z-index conflicts between Sheet and AlertDialog
       onClose();
+
+      setSaleResult({
+        saleNumber: response.sale.sale_number,
+        total: cart.grandTotal,
+        change: response.change,
+        saleId: response.sale.id,
+      });
+      setShowSaleResult(true);
 
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to complete sale');
       // Remove auto-added payment on error
-      if (autoAddedPayment) {
+      if (confirmData.autoAddedPayment) {
         payment.clearPayments();
       }
     } finally {
@@ -274,12 +299,42 @@ export default function POSPaymentDrawer({
     }
   };
 
-  const handleClose = () => {
+  const handlePrintReceipt = async () => {
+    if (!saleResult) return;
+    try {
+      const receiptData = await posApi.generateReceiptToken(saleResult.saleId);
+      // Receipt routes are on the web routes, not under /api
+      // Vite dev server proxies /api to backend, but receipt URLs need the backend directly
+      const backendOrigin = window.location.port === '5173' || window.location.port === '8080'
+        ? 'http://localhost:8000'
+        : window.location.origin;
+      window.open(`${backendOrigin}/receipt/${receiptData.token}`, '_blank');
+    } catch {
+      const backendOrigin = window.location.port === '5173' || window.location.port === '8080'
+        ? 'http://localhost:8000'
+        : window.location.origin;
+      window.open(`${backendOrigin}/admin/sales/${saleResult?.saleId}/receipt`, '_blank');
+    }
+  };
+
+  const handleFinishSale = () => {
+    setShowSaleResult(false);
+    cart.clearCart();
     payment.clearPayments();
+    // Drawer is already closed by onClose() called after API success
+  };
+
+  const handleClose = () => {
+    // Don't clear state if a sale was just completed — handleFinishSale handles that
+    if (showSaleResult) return;
+    payment.clearPayments();
+    // Reset discount in cart when closing without completing sale
+    cart.applyGlobalDiscount(0, 0);
     onClose();
   };
 
   return (
+  <>
     <Sheet open={open} onOpenChange={handleClose}>
       <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
         <SheetHeader>
@@ -294,7 +349,7 @@ export default function POSPaymentDrawer({
           <div>
             <Label className="text-base mb-3 block">Payment Method</Label>
             <div className="grid grid-cols-3 gap-2">
-              {paymentMethods.map((method) => {
+              {visiblePaymentMethods.map((method) => {
                 const Icon = method.icon;
                 return (
                   <Button
@@ -366,7 +421,7 @@ export default function POSPaymentDrawer({
           {/* Amount Input (Optional for exact payment) */}
           <div>
             <Label htmlFor="amount" className="text-base">Amount (optional)</Label>
-            <p className="text-sm text-muted-foreground mb-2">
+            <p className="text-sm text-muted-foreground dark:text-muted-foreground/80 mb-2">
               Use this only if the customer gives you more money than the total so you can give them change.
             </p>
             <div className="flex gap-2">
@@ -427,7 +482,7 @@ export default function POSPaymentDrawer({
                   >
                     <div className="flex-1">
                       <p className="font-semibold capitalize">{p.method}</p>
-                      {p.reference && <p className="text-sm text-muted-foreground">Ref: {p.reference}</p>}
+                      {p.reference && <p className="text-sm text-muted-foreground dark:text-muted-foreground/80">Ref: {p.reference}</p>}
                     </div>
                     <p className="font-bold text-lg mr-4">₦{p.amount.toLocaleString()}</p>
                     <Button
@@ -486,5 +541,56 @@ export default function POSPaymentDrawer({
         </div>
       </SheetContent>
     </Sheet>
+
+    {/* Complete Sale Confirmation */}
+    <AlertDialog open={showCompleteConfirm} onOpenChange={setShowCompleteConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Complete Sale?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="text-left">
+              <p className="mb-2"><strong>Total:</strong> ₦{cart.grandTotal.toLocaleString()}</p>
+              <p className="mb-2"><strong>Paid:</strong> ₦{(confirmData?.totalPaid ?? 0).toLocaleString()}</p>
+              {(confirmData?.change ?? 0) > 0 && (
+                <p className="mb-2 text-green-600 dark:text-green-400"><strong>Change:</strong> ₦{(confirmData?.change ?? 0).toLocaleString()}</p>
+              )}
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={handleConfirmCompleteSale} className="bg-green-600 hover:bg-green-700">
+            Complete Sale
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Sale Result */}
+    <AlertDialog open={showSaleResult} onOpenChange={(open) => { if (!open) handleFinishSale(); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Sale Completed!</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="text-left">
+              <p className="mb-2"><strong>Sale #:</strong> {saleResult?.saleNumber}</p>
+              <p className="mb-2"><strong>Total:</strong> ₦{(saleResult?.total ?? 0).toLocaleString()}</p>
+              {(saleResult?.change ?? 0) > 0 && (
+                <p className="text-green-600 dark:text-green-400 text-lg font-bold">Change: ₦{(saleResult?.change ?? 0).toLocaleString()}</p>
+              )}
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={handleFinishSale}>Close</AlertDialogCancel>
+          {receiptPromptEnabled && (
+            <AlertDialogAction onClick={handlePrintReceipt} className="bg-blue-600 hover:bg-blue-700">
+              Print Receipt
+            </AlertDialogAction>
+          )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  </>
   );
 }

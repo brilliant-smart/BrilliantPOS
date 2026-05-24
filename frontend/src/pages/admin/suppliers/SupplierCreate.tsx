@@ -78,7 +78,7 @@ export default function SupplierCreate() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center space-x-4">
         <Button variant="ghost" size="icon" onClick={() => navigate('/admin/suppliers')}>
           <ArrowLeft className="h-4 w-4" />

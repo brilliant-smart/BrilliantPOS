@@ -146,7 +146,7 @@ export default function BarcodeScanner({
                 <span className="w-full border-t" />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
+                <span className="bg-background px-2 text-muted-foreground dark:text-muted-foreground/80">
                   Or enter manually
                 </span>
               </div>
@@ -167,7 +167,7 @@ export default function BarcodeScanner({
           </div>
         )}
 
-        <p className="text-xs text-muted-foreground text-center">
+        <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 text-center">
           Position the barcode within the camera frame or enter the code manually
         </p>
       </CardContent>

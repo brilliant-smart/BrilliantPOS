@@ -26,6 +26,7 @@ import BatchList from "@/pages/admin/batches/BatchList";
 import SalesList from "@/pages/admin/sales/SalesList";
 import SaleCreate from "@/pages/admin/sales/SaleCreate";
 import SalesAnalytics from "@/pages/admin/sales/SalesAnalytics";
+import CreditList from "@/pages/admin/credit/CreditList";
 import POSTerminal from "@/pages/admin/pos/POSTerminal";
 import FinancialReports from "@/pages/admin/reports/FinancialReports";
 import PriceHistoryDashboard from "@/pages/admin/reports/PriceHistoryDashboard";
@@ -209,6 +210,16 @@ export default function AdminRoutes() {
             element={
               <RoleProtectedRoute allowedRoles={["owner", "manager"]}>
                 <SalesAnalytics />
+              </RoleProtectedRoute>
+            }
+          />
+
+          {/* Credit Tracking Route */}
+          <Route
+            path="credit"
+            element={
+              <RoleProtectedRoute allowedRoles={["owner", "manager"]}>
+                <CreditList />
               </RoleProtectedRoute>
             }
           />

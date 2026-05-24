@@ -6,10 +6,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
+    use SoftDeletes;
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
@@ -69,10 +71,28 @@ class User extends Authenticatable
         return $this->is_active === true;
     }
 
-//    public function canLogin(): bool
-//    {
-//        return (bool) $this->is_active;
-//    }
+    public function sales()
+    {
+        return $this->hasMany(Sale::class, 'cashier_id');
+    }
 
+    public function expenses()
+    {
+        return $this->hasMany(Expense::class, 'recorded_by');
+    }
 
+    public function stockMovements()
+    {
+        return $this->hasMany(StockMovement::class);
+    }
+
+    public function auditLogs()
+    {
+        return $this->hasMany(AuditLog::class);
+    }
+
+    public function heldCarts()
+    {
+        return $this->hasMany(HeldCart::class);
+    }
 }

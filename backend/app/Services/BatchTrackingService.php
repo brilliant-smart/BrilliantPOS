@@ -64,7 +64,12 @@ class BatchTrackingService
     {
         DB::transaction(function () use ($allocations) {
             foreach ($allocations as $allocation) {
-                $batch = ProductBatch::findOrFail($allocation['batch_id']);
+                $batch = ProductBatch::lockForUpdate()->findOrFail($allocation['batch_id']);
+
+                if ($batch->quantity_remaining < $allocation['quantity']) {
+                    throw new \Exception("Insufficient batch stock for batch {$batch->batch_number}. Available: {$batch->quantity_remaining}, Requested: {$allocation['quantity']}");
+                }
+
                 $batch->quantity_remaining -= $allocation['quantity'];
                 $batch->save();
             }
@@ -97,23 +102,29 @@ class BatchTrackingService
     public function markBatchAsExpired(ProductBatch $batch): void
     {
         DB::transaction(function () use ($batch) {
+            $batch = ProductBatch::lockForUpdate()->findOrFail($batch->id);
+            $product = Product::lockForUpdate()->findOrFail($batch->product_id);
+
             $batch->status = 'expired';
             $batch->save();
+
+            $previousStock = $product->stock_quantity;
 
             // Create stock movement for expired items
             StockMovement::create([
                 'product_id' => $batch->product_id,
-                'type' => 'damage', // Using damage type for expired items
+                'type' => 'damage',
                 'quantity' => -$batch->quantity_remaining,
                 'unit_cost' => $batch->cost_price,
+                'previous_stock' => $previousStock,
+                'new_stock' => $previousStock - $batch->quantity_remaining,
                 'reference_type' => 'ProductBatch',
                 'reference_id' => $batch->id,
-                'performed_by' => auth()->id(),
+                'user_id' => auth()->id(),
                 'notes' => "Batch {$batch->batch_number} marked as expired",
             ]);
 
             // Update product stock
-            $product = $batch->product;
             $product->stock_quantity -= $batch->quantity_remaining;
             $product->save();
 

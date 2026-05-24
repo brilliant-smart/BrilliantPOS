@@ -1,9 +1,15 @@
 import { api } from "@/app/lib/api";
+import type { Product, ProductUnitType } from "@/types/ims";
+
+export interface BarcodeSearchResult {
+  product: Product;
+  matched_unit_type?: ProductUnitType | null;
+}
 
 export const getProducts = () => {
   return api.get("/admin/products", {
     params: {
-      limit: 1000, // Get all products for admin panel (no pagination)
+      limit: 1000,
     },
   });
 };
@@ -25,24 +31,24 @@ export const deleteProduct = (id: number) => {
   return api.delete(`/admin/products/${id}`);
 };
 
-export const searchByBarcode = async (barcode: string) => {
+export const searchByBarcode = async (barcode: string): Promise<BarcodeSearchResult> => {
   const response = await api.get('/products/barcode/search', {
     params: { barcode }
   });
   return response.data;
 };
 
-export const searchProducts = async (query: string) => {
+export const searchProducts = async (query: string, opts?: { signal?: AbortSignal }) => {
   const response = await api.get('/products', {
-    params: { 
+    params: {
       search: query,
       limit: 10
-    }
+    },
+    signal: opts?.signal,
   });
   return response.data;
 };
 
-// Export as a single object for consistency with other API files
 export const productApi = {
   getAll: getProducts,
   get: getProduct,

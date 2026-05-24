@@ -8,6 +8,7 @@ class ProductBarcode extends Model
 {
     protected $fillable = [
         'product_id',
+        'product_unit_type_id',
         'barcode',
     ];
 
@@ -18,5 +19,10 @@ class ProductBarcode extends Model
     public function product()
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function unitType()
+    {
+        return $this->belongsTo(ProductUnitType::class, 'product_unit_type_id');
     }
 }

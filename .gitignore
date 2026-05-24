@@ -115,3 +115,7 @@ backend/public/hot
 backend/public/storage
 backend/storage/*.key
 backend/storage/pail
+
+# Release files (local reference only)
+RELEASE_v2.0.txt
+COMMIT_MESSAGE_v2.0

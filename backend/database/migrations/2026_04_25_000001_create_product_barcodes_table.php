@@ -12,6 +12,19 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            // SQLite can't drop columns with indexes; create table only
+            Schema::create('product_barcodes', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('product_id')->constrained()->onDelete('cascade');
+                $table->string('barcode', 100);
+                $table->timestamps();
+
+                $table->unique('barcode');
+                $table->index('product_id');
+            });
+            return;
+        }
         // Step 1: Create the product_barcodes table
         Schema::create('product_barcodes', function (Blueprint $table) {
             $table->id();
@@ -51,6 +64,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            Schema::dropIfExists('product_barcodes');
+            return;
+        }
         // Re-add barcode column to products
         Schema::table('products', function (Blueprint $table) {
             $table->string('barcode')->nullable()->after('sku');

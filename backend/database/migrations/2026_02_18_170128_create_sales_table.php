@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('sales', function (Blueprint $table) {
             $table->id();
             $table->string('sale_number')->unique(); // SALE-2026-0001
-            $table->foreignId('department_id')->constrained()->onDelete('restrict');
+            $table->foreignId('department_id')->nullable()->constrained()->onDelete('restrict');
             $table->foreignId('cashier_id')->constrained('users')->onDelete('restrict'); // Who made the sale
             
             $table->enum('sale_type', ['cash', 'credit', 'online', 'pos'])->default('cash');

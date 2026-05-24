@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Supplier;
+use App\Traits\EscapesLikeWildcards;
 use Illuminate\Http\Request;
 
 class SupplierController extends Controller
 {
+    use EscapesLikeWildcards;
     /**
      * Display a listing of suppliers
      * GET /api/suppliers
@@ -23,7 +26,7 @@ class SupplierController extends Controller
 
         // Search
         if ($request->filled('search')) {
-            $search = $request->search;
+            $search = $this->escapeLike($request->search);
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                   ->orWhere('code', 'like', "%{$search}%")
@@ -68,6 +71,8 @@ class SupplierController extends Controller
         }
 
         $supplier = Supplier::create($validated);
+
+        AuditLog::log('supplier.create', $supplier, null, $supplier->toArray(), "Supplier {$supplier->name} created");
 
         return response()->json([
             'message' => 'Supplier created successfully',
@@ -132,6 +137,8 @@ class SupplierController extends Controller
 
         $supplier->update($validated);
 
+        AuditLog::log('supplier.update', $supplier, null, $supplier->toArray(), "Supplier {$supplier->name} updated");
+
         return response()->json([
             'message' => 'Supplier updated successfully',
             'supplier' => $supplier,
@@ -151,6 +158,8 @@ class SupplierController extends Controller
             ], 422);
         }
 
+        AuditLog::log('supplier.delete', $supplier, null, null, "Supplier {$supplier->name} deleted");
+
         $supplier->delete();
 
         return response()->json([
@@ -167,6 +176,8 @@ class SupplierController extends Controller
         $supplier->update([
             'is_active' => !$supplier->is_active,
         ]);
+
+        AuditLog::log('supplier.toggle_status', $supplier, null, null, "Supplier {$supplier->name} " . ($supplier->is_active ? 'activated' : 'deactivated'));
 
         return response()->json([
             'message' => 'Supplier status updated successfully',

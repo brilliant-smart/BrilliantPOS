@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Scan } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { productApi } from '@/app/api/products';
 import { toast } from 'sonner';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import { DatePicker } from '@/components/DatePicker';
+import { todayLocal } from '@/utils/date';
 import { createBarcodeScanner } from '@/utils/barcodeScanner';
 
 export default function SaleCreate() {
@@ -20,7 +21,7 @@ export default function SaleCreate() {
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [formData, setFormData] = useState({
-    sale_date: new Date().toISOString().split('T')[0],
+    sale_date: todayLocal(),
     customer_name: '',
     customer_phone: '',
     sale_type: 'cash' as 'cash' | 'credit' | 'online' | 'pos',
@@ -33,41 +34,44 @@ export default function SaleCreate() {
   const [showScanner, setShowScanner] = useState(false);
   const [scanningForIndex, setScanningForIndex] = useState<number | null>(null);
   const externalScannerRef = useRef<any>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   useEffect(() => {
     loadProducts();
   }, []);
 
-  // External barcode scanner support - AUTO-DETECT enabled by default
+  // External barcode scanner support - uses ref to avoid stale closures
   useEffect(() => {
     if (!externalScannerRef.current) {
       externalScannerRef.current = createBarcodeScanner({
         onScan: async (barcode) => {
           try {
             const product = await productApi.searchByBarcode(barcode);
-            
-            // Find first empty row or add new row
-            const emptyIndex = items.findIndex(item => !item.product_id);
+
+            // Use ref to get latest items without stale closure
+            const currentItems = itemsRef.current;
+            const emptyIndex = currentItems.findIndex(item => !item.product_id);
             if (emptyIndex !== -1) {
-              // Update the items state properly
-              const newItems = [...items];
-              newItems[emptyIndex] = {
-                ...newItems[emptyIndex],
-                product_id: product.id.toString(),
-                unit_price: product.price || 0,
-                unit_type: product.unit_type || 'piece'
-              };
-              setItems(newItems);
+              setItems(prev => {
+                const newItems = [...prev];
+                newItems[emptyIndex] = {
+                  ...newItems[emptyIndex],
+                  product_id: product.id.toString(),
+                  unit_price: product.price || 0,
+                  unit_type: product.unit_type || 'piece'
+                };
+                return newItems;
+              });
             } else {
-              // Add new item
-              setItems([...items, {
+              setItems(prev => [...prev, {
                 product_id: product.id.toString(),
                 quantity: 1,
                 unit_price: product.price || 0,
                 unit_type: product.unit_type || 'piece'
               }]);
             }
-            
+
             toast.success(`Added: ${product.name}`);
           } catch (error: any) {
             toast.error(error.response?.data?.message || 'Product not found');
@@ -78,7 +82,7 @@ export default function SaleCreate() {
         preventDefault: true,
         ignoreIfFocusOn: ['input[type="text"]', 'input[type="number"]', 'textarea', 'select'],
       });
-      
+
       externalScannerRef.current.start();
     }
 
@@ -87,7 +91,7 @@ export default function SaleCreate() {
         externalScannerRef.current.stop();
       }
     };
-  }, [items, products]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadProducts = async () => {
     try {
@@ -186,7 +190,7 @@ export default function SaleCreate() {
   const total = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="ghost" size="icon" onClick={() => navigate('/admin/sales')}>

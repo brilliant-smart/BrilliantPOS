@@ -82,4 +82,10 @@ export const posApi = {
     const response = await api.get(`/pos/reprint/${saleId}`);
     return response.data;
   },
+
+  // Generate short-lived receipt token
+  generateReceiptToken: async (saleId: number) => {
+    const response = await api.post(`/pos/sales/${saleId}/receipt-token`);
+    return response.data;
+  },
 };

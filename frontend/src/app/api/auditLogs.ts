@@ -4,12 +4,16 @@ export interface AuditLog {
   id: number;
   user_id: number;
   action: string;
+  action_label: string;
+  action_category: string;
   model_type: string;
+  model_label: string;
   model_id: number | null;
   old_values: any;
   new_values: any;
   ip_address: string;
   user_agent: string;
+  description: string | null;
   created_at: string;
   user?: {
     id: number;
@@ -22,6 +26,7 @@ export interface AuditLog {
 export interface AuditLogFilters {
   user_id?: number;
   action?: string;
+  action_category?: string;
   model_type?: string;
   start_date?: string;
   end_date?: string;

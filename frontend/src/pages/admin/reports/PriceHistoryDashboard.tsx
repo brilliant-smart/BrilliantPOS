@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,7 @@ import { format } from 'date-fns';
 import { DatePicker } from '@/components/DatePicker';
 import { api } from '@/app/lib/api';
 import { toast } from 'sonner';
+import { DataPagination } from '@/components/DataPagination';
 
 interface PriceHistoryRecord {
   id: number;
@@ -52,6 +53,8 @@ export default function PriceHistoryDashboard() {
   const [trendFilter, setTrendFilter] = useState<string>('all'); // all, increase, decrease
   const [startDate, setStartDate] = useState<Date | undefined>();
   const [endDate, setEndDate] = useState<Date | undefined>();
+  const [currentPage, setCurrentPage] = useState(1);
+  const PER_PAGE = 20;
   const [stats, setStats] = useState({
     totalChanges: 0,
     priceIncreases: 0,
@@ -68,6 +71,7 @@ export default function PriceHistoryDashboard() {
 
   useEffect(() => {
     applyFilters();
+    setCurrentPage(1);
   }, [priceHistory, searchTerm, changeTypeFilter, trendFilter, startDate, endDate]);
 
   const fetchPriceHistory = async () => {
@@ -151,6 +155,13 @@ export default function PriceHistoryDashboard() {
 
     setFilteredHistory(filtered);
   };
+
+  const paginatedHistory = useMemo(() => {
+    const start = (currentPage - 1) * PER_PAGE;
+    return filteredHistory.slice(start, start + PER_PAGE);
+  }, [filteredHistory, currentPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredHistory.length / PER_PAGE));
 
   const getPriceChangeBadge = (change: number | string, percentChange: number | string) => {
     const changeNum = toNumber(change);
@@ -381,7 +392,7 @@ export default function PriceHistoryDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredHistory.map((record) => (
+                  {paginatedHistory.map((record) => (
                     <TableRow key={record.id}>
                       <TableCell className="text-sm">
                         {format(new Date(record.changed_at), 'MMM dd, yyyy HH:mm')}
@@ -412,6 +423,14 @@ export default function PriceHistoryDashboard() {
           )}
         </CardContent>
       </Card>
+
+      <DataPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalRecords={filteredHistory.length}
+        perPage={PER_PAGE}
+        onPageChange={setCurrentPage}
+      />
     </div>
   );
 }

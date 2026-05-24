@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\AuditLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
@@ -44,6 +45,8 @@ class UserController extends Controller
             'role'          => $validated['role'],
         ]);
 
+        AuditLog::log('user.create', $user, null, $user->toArray(), "User {$user->name} created");
+
         return response()->json($user, 201);
     }
 
@@ -71,6 +74,8 @@ class UserController extends Controller
 
         $user->update($validated);
 
+        AuditLog::log('user.update', $user, null, $user->toArray(), "User {$user->name} updated");
+
         return response()->json($user);
     }
 
@@ -87,6 +92,8 @@ class UserController extends Controller
         }
 
         $user->update(['is_active' => false]);
+
+        AuditLog::log('user.deactivate', $user, null, null, "User {$user->name} deactivated");
 
         return response()->json(['message' => 'User deactivated']);
     }
@@ -118,6 +125,8 @@ class UserController extends Controller
 
         // Revoke all tokens so they're immediately logged out
         $user->tokens()->delete();
+
+        AuditLog::log('user.delete', $user, null, null, "User {$user->name} permanently deleted");
 
         return response()->json(['message' => 'User deleted successfully']);
     }

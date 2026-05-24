@@ -8,6 +8,16 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            // SQLite cannot drop foreign key constraints or columns that have FK references.
+            // On SQLite, we keep the departments table (empty) and leave the department_id
+            // columns as-is. The columns become orphaned integer columns with no FK enforcement
+            // since we don't enforce FKs in tests (see TestCase setUp).
+            // Drop stock_transfers since that's a separate table.
+            Schema::dropIfExists('stock_transfers');
+            return;
+        }
+
         DB::statement('SET FOREIGN_KEY_CHECKS=0');
 
         // Drop stock_transfers table (inter-department only)
@@ -36,6 +46,8 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') { return; }
+
         // This migration is not reversible
     }
 };

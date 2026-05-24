@@ -61,10 +61,20 @@ const POSCartItem: React.FC<POSCartItemProps> = React.memo(({
       <td className="px-3 py-2">
         <div>
           <p className="font-medium text-sm text-foreground leading-tight">{item.product_name}</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            {item.sku && `SKU: ${item.sku} | `}
-            Stock: {item.stock_available} {item.unit_type}
-          </p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            {item.sku && (
+              <span className="text-[11px] text-muted-foreground dark:text-muted-foreground/80">SKU: {item.sku}</span>
+            )}
+            {item.quantity >= item.stock_available ? (
+              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                Max stock ({item.stock_available} {item.unit_type})
+              </span>
+            ) : (
+              <span className="text-[11px] text-muted-foreground dark:text-muted-foreground/80">
+                Stock: {item.stock_available} {item.unit_type}
+              </span>
+            )}
+          </div>
         </div>
       </td>
 
@@ -109,6 +119,7 @@ const POSCartItem: React.FC<POSCartItemProps> = React.memo(({
             size="icon"
             className="h-7 w-7"
             onClick={onIncrement}
+            disabled={item.quantity >= item.stock_available}
           >
             <Plus className="h-3 w-3" />
           </Button>

@@ -20,6 +20,7 @@ class ProductBatch extends Model
         'cost_price',
         'selling_price',
         'purchase_order_id',
+        'purchase_order_item_id',
         'supplier_id',
         'status',
         'notes',

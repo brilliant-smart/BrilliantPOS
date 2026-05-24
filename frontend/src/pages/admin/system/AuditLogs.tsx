@@ -24,28 +24,76 @@ import {
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { DatePicker } from '@/components/DatePicker';
+import { DataPagination } from '@/components/DataPagination';
+
+const PER_PAGE = 50;
+
+const ACTION_CATEGORIES = [
+  { value: 'create', label: 'Created' },
+  { value: 'update', label: 'Updated' },
+  { value: 'delete', label: 'Deleted' },
+  { value: 'auth', label: 'Sign In / Sign Out' },
+  { value: 'security', label: 'Security Changes' },
+  { value: 'backup', label: 'Backup Operations' },
+  { value: 'stock', label: 'Stock Adjustments' },
+  { value: 'void', label: 'Voided / Cancelled' },
+  { value: 'approve', label: 'Approved' },
+  { value: 'payment', label: 'Payments' },
+];
+
+const MODEL_TYPES = [
+  { value: 'User', label: 'User' },
+  { value: 'Product', label: 'Product' },
+  { value: 'Sale', label: 'Sale' },
+  { value: 'PurchaseOrder', label: 'Purchase Order' },
+  { value: 'Supplier', label: 'Supplier' },
+  { value: 'Expense', label: 'Expense' },
+  { value: 'ExpenseCategory', label: 'Expense Category' },
+  { value: 'BatchTracking', label: 'Batch' },
+  { value: 'Setting', label: 'Settings' },
+  { value: 'SecuritySetting', label: 'Security Settings' },
+  { value: 'Backup', label: 'Backup' },
+];
+
+const CATEGORY_COLORS: Record<string, string> = {
+  create: 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-400',
+  update: 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-400',
+  delete: 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-400',
+  auth: 'bg-cyan-100 dark:bg-cyan-900/40 text-cyan-800 dark:text-cyan-400',
+  security: 'bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-400',
+  backup: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-400',
+  stock: 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-400',
+  void: 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-400',
+  approve: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-400',
+  payment: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-400',
+  other: 'bg-muted text-foreground',
+};
 
 export default function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [filters, setFilters] = useState<AuditLogFilters>({
     page: 1,
-    per_page: 50,
+    per_page: PER_PAGE,
   });
-  const [totalRecords, setTotalRecords] = useState(0);
   const [statistics, setStatistics] = useState<any>(null);
 
   useEffect(() => {
-    loadLogs();
+    loadLogs(filters.page || 1);
     loadStatistics();
   }, [filters]);
 
-  const loadLogs = async () => {
+  const loadLogs = async (page: number = 1) => {
     try {
       setLoading(true);
-      const data = await auditLogApi.getAuditLogs(filters);
-      setLogs(data.data || data.audit_logs || []);
-      setTotalRecords(data.total || data.data?.length || 0);
+      const data = await auditLogApi.getAuditLogs({ ...filters, page, per_page: PER_PAGE });
+      setLogs(data.data || []);
+      setCurrentPage(data.meta?.current_page || data.current_page || page);
+      setTotalPages(data.meta?.last_page || data.last_page || 1);
+      setTotalRecords(data.meta?.total || data.total || 0);
     } catch (error: any) {
       toast.error('Failed to load audit logs');
       console.error('Audit log load error:', error);
@@ -65,16 +113,16 @@ export default function AuditLogs() {
 
   const handleExport = async () => {
     try {
-      const { per_page, page, ...exportFilters } = filters;
-      const allData = await auditLogApi.getAuditLogs({ ...exportFilters, per_page: 10000 });
+      const { page, per_page, ...exportFilters } = filters;
+      const allData = await auditLogApi.getAuditLogs({ ...exportFilters, per_page: 5000 });
       const allLogs: AuditLog[] = allData.data || allData.audit_logs || [];
 
-      const headers = ['Date', 'User', 'Action', 'Model', 'IP Address'];
+      const headers = ['Date', 'User', 'Action', 'Target', 'IP Address'];
       const rows = allLogs.map(log => [
         format(new Date(log.created_at), 'yyyy-MM-dd HH:mm:ss'),
-        log.user?.name || 'N/A',
-        log.action,
-        log.model_type,
+        log.user?.name || 'System',
+        log.action_label,
+        log.model_label + (log.model_id ? ` #${log.model_id}` : ''),
         log.ip_address,
       ]);
 
@@ -99,24 +147,12 @@ export default function AuditLogs() {
     }
   };
 
-  const getActionColor = (action: string) => {
-    const colors: Record<string, string> = {
-      created: 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-400',
-      updated: 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-400',
-      deleted: 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-400',
-      restored: 'bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-400',
-      login: 'bg-cyan-100 dark:bg-cyan-900/40 text-cyan-800 dark:text-cyan-400',
-      logout: 'bg-muted text-foreground',
-    };
-    return colors[action.toLowerCase()] || 'bg-muted text-foreground';
-  };
-
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Audit Logs</h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground dark:text-muted-foreground/80 mt-1">
             Track all system activities and changes
           </p>
         </div>
@@ -165,11 +201,11 @@ export default function AuditLogs() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <Label>Action</Label>
+              <Label>Action Type</Label>
               <Select
-                value={filters.action || 'all'}
+                value={filters.action_category || 'all'}
                 onValueChange={(v) =>
-                  setFilters({ ...filters, action: v === 'all' ? undefined : v, page: 1 })
+                  setFilters({ ...filters, action_category: v === 'all' ? undefined : v, page: 1 })
                 }
               >
                 <SelectTrigger>
@@ -177,17 +213,15 @@ export default function AuditLogs() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Actions</SelectItem>
-                  <SelectItem value="created">Created</SelectItem>
-                  <SelectItem value="updated">Updated</SelectItem>
-                  <SelectItem value="deleted">Deleted</SelectItem>
-                  <SelectItem value="login">Login</SelectItem>
-                  <SelectItem value="logout">Logout</SelectItem>
+                  {ACTION_CATEGORIES.map(cat => (
+                    <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label>Model</Label>
+              <Label>Target</Label>
               <Select
                 value={filters.model_type || 'all'}
                 onValueChange={(v) =>
@@ -195,15 +229,13 @@ export default function AuditLogs() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="All models" />
+                  <SelectValue placeholder="All targets" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Models</SelectItem>
-                  <SelectItem value="Product">Product</SelectItem>
-                  <SelectItem value="Sale">Sale</SelectItem>
-                  <SelectItem value="PurchaseOrder">Purchase Order</SelectItem>
-                  <SelectItem value="User">User</SelectItem>
-                  <SelectItem value="Supplier">Supplier</SelectItem>
+                  <SelectItem value="all">All Targets</SelectItem>
+                  {MODEL_TYPES.map(model => (
+                    <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -228,13 +260,24 @@ export default function AuditLogs() {
           <div className="mt-4 flex justify-end">
             <Button
               variant="outline"
-              onClick={() => setFilters({ page: 1, per_page: 50 })}
+              onClick={() => { setFilters({ page: 1, per_page: PER_PAGE }); setCurrentPage(1); }}
             >
               Clear Filters
             </Button>
           </div>
         </CardContent>
       </Card>
+
+      <DataPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalRecords={totalRecords}
+        perPage={PER_PAGE}
+        onPageChange={(page) => {
+          setCurrentPage(page);
+          setFilters({ ...filters, page });
+        }}
+      />
 
       <Card>
         <CardHeader>
@@ -246,12 +289,12 @@ export default function AuditLogs() {
         <CardContent>
           {loading ? (
             <div className="text-center py-12">
-              <p className="text-muted-foreground">Loading...</p>
+              <p className="text-muted-foreground dark:text-muted-foreground/80">Loading...</p>
             </div>
           ) : logs.length === 0 ? (
             <div className="text-center py-12">
-              <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">No audit logs found</p>
+              <FileText className="h-12 w-12 text-muted-foreground dark:text-muted-foreground/80 mx-auto mb-4" />
+              <p className="text-muted-foreground dark:text-muted-foreground/80">No audit logs found</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -261,7 +304,7 @@ export default function AuditLogs() {
                     <TableHead>Date & Time</TableHead>
                     <TableHead>User</TableHead>
                     <TableHead>Action</TableHead>
-                    <TableHead>Model</TableHead>
+                    <TableHead>Target</TableHead>
                     <TableHead>IP Address</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -274,23 +317,23 @@ export default function AuditLogs() {
                       <TableCell>
                         <div>
                           <p className="font-medium">{log.user?.name || 'System'}</p>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                             {log.user?.email || 'N/A'}
                           </p>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge className={getActionColor(log.action)}>
-                          {log.action}
+                        <Badge className={CATEGORY_COLORS[log.action_category] || CATEGORY_COLORS.other}>
+                          {log.action_label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {log.model_type}
+                      <TableCell className="text-sm">
+                        <span className="font-medium">{log.model_label}</span>
                         {log.model_id && (
-                          <span className="text-muted-foreground"> #{log.model_id}</span>
+                          <span className="text-muted-foreground dark:text-muted-foreground/80"> #{log.model_id}</span>
                         )}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono text-xs text-muted-foreground dark:text-muted-foreground/80">
                         {log.ip_address}
                       </TableCell>
                     </TableRow>

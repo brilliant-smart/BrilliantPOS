@@ -6,24 +6,36 @@ export interface ProfitLossReport {
     end_date: string;
   };
   revenue: {
-    total_sales: number;
+    total_sales_count: number;
     total_revenue: number;
+    average_sale_value: number;
   };
   costs: {
+    cost_of_goods_sold: number;
     total_purchases: number;
-    cogs: number;
   };
   profit: {
     gross_profit: number;
-    gross_margin: number;
+    profit_margin_percent: number;
+  };
+  cash_flow: {
+    cash_in: number;
+    cash_out: number;
+    net_cash_flow: number;
+  };
+  outstanding: {
+    receivables: number;
+    payables: number;
+  };
+  inventory: {
+    current_stock_value: number;
+    total_products: number;
+    low_stock_items: number;
+    out_of_stock_items: number;
   };
 }
 
 export interface StockVarianceReport {
-  period: {
-    start_date: string;
-    end_date: string;
-  };
   variances: Array<{
     product_id: number;
     product_name: string;
@@ -31,17 +43,13 @@ export interface StockVarianceReport {
     expected_stock: number;
     actual_stock: number;
     variance: number;
+    variance_percent: number;
     variance_value: number;
+    severity: string;
   }>;
-  summary: {
-    total_products_checked: number;
-    products_with_variance: number;
-    total_variance_value: number;
-  };
 }
 
 export interface ExpiringProductsReport {
-  days_ahead: number;
   products: Array<{
     product_id: number;
     product_name: string;
@@ -50,13 +58,9 @@ export interface ExpiringProductsReport {
     expiry_date: string;
     days_until_expiry: number;
     stock_quantity: number;
-    value_at_risk: number;
+    stock_value: number;
+    urgency: string;
   }>;
-  summary: {
-    total_products: number;
-    total_units: number;
-    total_value_at_risk: number;
-  };
 }
 
 export const reportsApi = {

@@ -14,7 +14,16 @@ import { Ban, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { posApi } from '@/app/api/pos';
 import { salesApi } from '@/app/api/sales';
-import Swal from 'sweetalert2';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface POSVoidModalProps {
   open: boolean;
@@ -26,6 +35,7 @@ export default function POSVoidModal({ open, onClose }: POSVoidModalProps) {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [saleDetails, setSaleDetails] = useState<any>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleSearchSale = async () => {
     if (!saleNumber.trim()) {
@@ -35,9 +45,12 @@ export default function POSVoidModal({ open, onClose }: POSVoidModalProps) {
 
     try {
       setLoading(true);
-      // Search by sale number
-      const sales = await salesApi.getAll();
-      const sale = sales.find((s: any) => s.sale_number === saleNumber.trim());
+      // Search by sale number using the API search parameter
+      const response = await salesApi.getAll({ search: saleNumber.trim(), per_page: 5 });
+      const sales = response.data || response;
+      const sale = Array.isArray(sales)
+        ? sales.find((s: any) => s.sale_number === saleNumber.trim())
+        : null;
 
       if (!sale) {
         toast.error('Sale not found');
@@ -69,31 +82,17 @@ export default function POSVoidModal({ open, onClose }: POSVoidModalProps) {
       return;
     }
 
-    const result = await Swal.fire({
-      title: 'Void This Sale?',
-      html: `
-        <div class="text-left">
-          <p class="mb-2"><strong>Sale #:</strong> ${saleDetails.sale_number}</p>
-          <p class="mb-2"><strong>Amount:</strong> ₦${parseFloat(saleDetails.total_amount).toLocaleString()}</p>
-          <p class="mb-2"><strong>Reason:</strong> ${reason}</p>
-          <p class="text-red-600 mt-4"><strong>Warning:</strong> This will restore stock and cannot be undone!</p>
-        </div>
-      `,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonText: 'Void Sale',
-      cancelButtonText: 'Cancel',
-      confirmButtonColor: '#dc2626',
-    });
+    setShowConfirm(true);
+  };
 
-    if (!result.isConfirmed) return;
-
+  const confirmVoidSale = async () => {
+    setShowConfirm(false);
     try {
       setLoading(true);
       await posApi.voidSale(saleDetails.id, { reason });
 
       toast.success('Sale voided successfully');
-      
+
       // Reset form
       setSaleNumber('');
       setReason('');
@@ -142,19 +141,19 @@ export default function POSVoidModal({ open, onClose }: POSVoidModalProps) {
               <h3 className="font-semibold mb-3">Sale Details</h3>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
-                  <p className="text-muted-foreground">Sale Number:</p>
+                  <p className="text-muted-foreground dark:text-muted-foreground/80">Sale Number:</p>
                   <p className="font-semibold">{saleDetails.sale_number}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Date:</p>
+                  <p className="text-muted-foreground dark:text-muted-foreground/80">Date:</p>
                   <p className="font-semibold">{new Date(saleDetails.sale_date).toLocaleDateString()}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Total Amount:</p>
+                  <p className="text-muted-foreground dark:text-muted-foreground/80">Total Amount:</p>
                   <p className="font-semibold text-lg">₦{parseFloat(saleDetails.total_amount).toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Items:</p>
+                  <p className="text-muted-foreground dark:text-muted-foreground/80">Items:</p>
                   <p className="font-semibold">{saleDetails.items?.length || 0}</p>
                 </div>
               </div>
@@ -190,6 +189,28 @@ export default function POSVoidModal({ open, onClose }: POSVoidModalProps) {
           )}
         </div>
       </DialogContent>
+
+      <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Void This Sale?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <div className="text-left space-y-1">
+                <p><strong>Sale #:</strong> {saleDetails?.sale_number}</p>
+                <p><strong>Amount:</strong> ₦{saleDetails ? parseFloat(saleDetails.total_amount).toLocaleString() : '0'}</p>
+                <p><strong>Reason:</strong> {reason}</p>
+                <p className="text-red-600 mt-2"><strong>Warning:</strong> This will restore stock and cannot be undone!</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmVoidSale} className="bg-red-600 hover:bg-red-700">
+              Void Sale
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

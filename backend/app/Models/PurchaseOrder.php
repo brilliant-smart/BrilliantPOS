@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 class PurchaseOrder extends Model
 {
@@ -125,13 +126,15 @@ class PurchaseOrder extends Model
      */
     public static function generatePoNumber(): string
     {
-        $year = date('Y');
-        $lastPo = self::whereYear('created_at', $year)
-            ->orderBy('id', 'desc')
-            ->first();
+        return DB::transaction(function () {
+            $year = date('Y');
+            $lastNumber = self::whereYear('created_at', $year)
+                ->lockForUpdate()
+                ->selectRaw("CAST(SUBSTRING(po_number, -4) AS UNSIGNED) as num")
+                ->orderByDesc('num')
+                ->value('num') ?? 0;
 
-        $nextNumber = $lastPo ? (int)substr($lastPo->po_number, -4) + 1 : 1;
-
-        return 'PO-' . $year . '-' . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
+            return 'PO-' . $year . '-' . str_pad($lastNumber + 1, 4, '0', STR_PAD_LEFT);
+        });
     }
 }

@@ -4,12 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Sale;
+use App\Models\Product;
+use App\Models\StockMovement;
+use App\Models\AuditLog;
+use App\Models\Setting;
 use App\Services\SaleService;
+use App\Traits\EscapesLikeWildcards;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\DB;
 
 class SaleController extends Controller
 {
+    use EscapesLikeWildcards;
+
     protected $saleService;
 
     public function __construct(SaleService $saleService)
@@ -23,7 +31,12 @@ class SaleController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Sale::with(['cashier']);
+        $query = Sale::with(['cashier:id,name'])->withCount('items');
+
+        // Exclude voided sales by default (can be included via ?include_voided=1)
+        if (!$request->boolean('include_voided')) {
+            $query->where('status', '!=', 'voided');
+        }
 
         // Sale type filter
         if ($request->filled('sale_type')) {
@@ -50,7 +63,7 @@ class SaleController extends Controller
 
         // Search
         if ($request->filled('search')) {
-            $search = $request->search;
+            $search = $this->escapeLike($request->search);
             $query->where(function ($q) use ($search) {
                 $q->where('sale_number', 'like', "%{$search}%")
                   ->orWhere('customer_name', 'like', "%{$search}%")
@@ -58,7 +71,7 @@ class SaleController extends Controller
             });
         }
 
-        $sales = $query->latest('sale_date')
+        $sales = $query->latest('created_at')
             ->paginate($request->input('per_page', 15));
 
         return response()->json($sales);
@@ -87,8 +100,34 @@ class SaleController extends Controller
             'items.*.notes' => 'nullable|string',
         ]);
 
+        // Derive payment_status from amount_paid vs total to prevent client-side spoofing
+        if (isset($validated['items'])) {
+            $subtotal = 0;
+            foreach ($validated['items'] as $item) {
+                $lineTotal = ($item['quantity'] ?? 0) * ($item['unit_price'] ?? 0);
+                $lineTotal -= $lineTotal * (($item['discount_percent'] ?? 0) / 100);
+                $subtotal += $lineTotal;
+            }
+            $total = $subtotal - ($validated['discount_amount'] ?? 0);
+            $amountPaid = (float) ($validated['amount_paid'] ?? $total);
+            $saleType = $validated['sale_type'] ?? 'cash';
+
+            // For credit sales, override amount_paid and payment_status
+            if ($saleType === 'credit') {
+                $validated['payment_status'] = $amountPaid > 0 ? 'partially_paid' : 'unpaid';
+            } elseif ($amountPaid >= $total) {
+                $validated['payment_status'] = 'paid';
+            } elseif ($amountPaid > 0) {
+                $validated['payment_status'] = 'partially_paid';
+            } else {
+                $validated['payment_status'] = 'unpaid';
+            }
+        }
+
         try {
             $sale = $this->saleService->createSale($validated, $request->user());
+
+            AuditLog::log('sale.create', $sale, null, $sale->toArray(), "Sale {$sale->sale_number} created");
 
             return response()->json([
                 'message' => 'Sale created successfully',
@@ -108,7 +147,7 @@ class SaleController extends Controller
      */
     public function show(Sale $sale)
     {
-        $sale->load(['items.product', 'cashier']);
+        $sale->load(['items.product', 'items.unitType', 'cashier', 'payments']);
 
         return response()->json($sale);
     }
@@ -121,14 +160,22 @@ class SaleController extends Controller
     {
         $validated = $request->validate([
             'amount' => 'required|numeric|min:0.01',
+            'method' => 'nullable|string|in:cash,pos,bank_transfer',
+            'reference' => 'nullable|string|max:255',
+            'notes' => 'nullable|string|max:1000',
         ]);
 
         try {
             $updatedSale = $this->saleService->recordPayment(
                 $sale,
                 $validated['amount'],
-                $request->user()
+                $request->user(),
+                $validated['method'] ?? null,
+                $validated['reference'] ?? null,
+                $validated['notes'] ?? null
             );
+
+            AuditLog::log('sale.payment', $sale, null, ['amount_paid' => $validated['amount']], "Payment of ₦{$validated['amount']} recorded for {$sale->sale_number}");
 
             return response()->json([
                 'message' => 'Payment recorded successfully',
@@ -143,12 +190,107 @@ class SaleController extends Controller
     }
 
     /**
+     * Update contact name for a credit sale
+     * PATCH /api/sales/{sale}/contact
+     */
+    public function updateContact(Request $request, Sale $sale)
+    {
+        $validated = $request->validate([
+            'contact_name' => 'nullable|string|max:255',
+            'customer_phone' => 'nullable|string|max:20',
+        ]);
+
+        $sale->update($validated);
+
+        return response()->json([
+            'message' => 'Contact updated',
+            'contact_name' => $sale->contact_name,
+            'customer_phone' => $sale->customer_phone,
+        ]);
+    }
+
+    /**
+     * Get credit summary for outstanding credit tracking
+     * GET /api/sales/credit-summary
+     */
+    public function creditSummary(Request $request)
+    {
+        $thresholdDays = Setting::get('credit_overdue_threshold_days', 7);
+
+        // Use SQL aggregation for summary stats (no PHP loop needed)
+        $baseQuery = Sale::whereIn('payment_status', ['unpaid', 'partially_paid']);
+
+        $totalOutstanding = round((float) $baseQuery->clone()
+            ->selectRaw('COALESCE(SUM(total_amount - amount_paid), 0) as total')
+            ->value('total'), 2);
+
+        $overdueData = $baseQuery->clone()
+            ->selectRaw('COUNT(*) as count, ROUND(COALESCE(SUM(total_amount - amount_paid), 0), 2) as total')
+            ->whereRaw('DATEDIFF(?, sale_date) >= ?', [now(), $thresholdDays])
+            ->first();
+
+        $pendingData = $baseQuery->clone()
+            ->selectRaw('COUNT(*) as count, ROUND(COALESCE(SUM(total_amount - amount_paid), 0), 2) as total')
+            ->whereRaw('DATEDIFF(?, sale_date) < ?', [now(), $thresholdDays])
+            ->first();
+
+        // Paginated credit items with eager-loaded cashier
+        $credits = $baseQuery->clone()
+            ->with(['cashier:id,name'])
+            ->orderBy('sale_date', 'asc')
+            ->paginate($request->input('per_page', 50))
+            ->through(function ($sale) use ($thresholdDays) {
+                $balance = round((float) $sale->total_amount - (float) $sale->amount_paid, 2);
+                $daysOutstanding = max(0, (int) now()->diffInDays($sale->sale_date));
+
+                return [
+                    'id' => $sale->id,
+                    'sale_number' => $sale->sale_number,
+                    'sale_date' => $sale->sale_date->toIso8601String(),
+                    'customer_name' => $sale->customer_name ?: 'Walk-in',
+                    'customer_phone' => $sale->customer_phone,
+                    'contact_name' => $sale->contact_name,
+                    'total_amount' => round((float) $sale->total_amount, 2),
+                    'amount_paid' => round((float) $sale->amount_paid, 2),
+                    'balance' => $balance,
+                    'days_outstanding' => $daysOutstanding,
+                    'status' => $daysOutstanding >= $thresholdDays ? 'overdue' : 'pending',
+                    'cashier_name' => $sale->cashier?->name,
+                ];
+            });
+
+        return response()->json([
+            'total_outstanding' => $totalOutstanding,
+            'overdue_count' => (int) $overdueData->count,
+            'overdue_amount' => (float) $overdueData->total,
+            'pending_count' => (int) $pendingData->count,
+            'pending_amount' => (float) $pendingData->total,
+            'credits' => $credits,
+        ]);
+    }
+
+    /**
+     * Get overdue credit count for sidebar badge
+     * GET /api/sales/overdue-count
+     */
+    public function overdueCount(Request $request)
+    {
+        $thresholdDays = Setting::get('credit_overdue_threshold_days', 7);
+
+        $count = Sale::whereIn('payment_status', ['unpaid', 'partially_paid'])
+            ->whereRaw("DATEDIFF(?, sale_date) >= ?", [now(), $thresholdDays])
+            ->count();
+
+        return response()->json(['count' => $count]);
+    }
+
+    /**
      * Get sales summary/statistics
      * GET /api/sales/summary
      */
     public function summary(Request $request)
     {
-        $query = Sale::query();
+        $query = Sale::where('status', '!=', 'voided');
 
         // Date range (default to today)
         $startDate = $request->input('start_date', now()->startOfDay());
@@ -163,15 +305,18 @@ class SaleController extends Controller
             'total_profit' => $query->sum('gross_profit'),
             'average_sale_value' => $query->avg('total_amount'),
             'total_outstanding' => Sale::where('payment_status', '!=', 'paid')
+                ->where('status', '!=', 'voided')
                 ->sum('amount_due'),
             'sales_by_type' => Sale::query()
                 ->selectRaw('sale_type, COUNT(*) as count, SUM(total_amount) as total')
                 ->whereBetween('sale_date', [$startDate, $endDate])
+                ->where('status', '!=', 'voided')
                 ->groupBy('sale_type')
                 ->get(),
             'sales_by_payment_status' => Sale::query()
                 ->selectRaw('payment_status, COUNT(*) as count, SUM(total_amount) as total')
                 ->whereBetween('sale_date', [$startDate, $endDate])
+                ->where('status', '!=', 'voided')
                 ->groupBy('payment_status')
                 ->get(),
         ];
@@ -216,86 +361,101 @@ class SaleController extends Controller
                 $endDate = now()->endOfMonth();
         }
 
-        $query = Sale::query();
+        $query = Sale::where('status', '!=', 'voided');
 
         // Date range
         $query->whereBetween('sale_date', [$startDate, $endDate]);
 
-        // Get all sales for the period
-        $sales = $query->get();
+        // Use SQL aggregation for summary metrics instead of loading all records
+        $summaryData = (clone $query)->selectRaw('
+            COUNT(*) as total_sales,
+            COALESCE(SUM(total_amount), 0) as total_revenue,
+            COALESCE(SUM(gross_profit), 0) as total_profit,
+            COALESCE(SUM(cost_of_goods_sold), 0) as total_cogs,
+            COALESCE(AVG(total_amount), 0) as average_sale_value,
+            COALESCE(AVG(gross_profit), 0) as average_profit
+        ')->first();
 
-        // Calculate summary metrics
-        $summary = [
-            'total_sales' => $sales->count(),
-            'total_orders' => $sales->count(),
-            'total_revenue' => $sales->sum('total_amount'),
-            'total_profit' => $sales->sum('gross_profit'),
-            'total_cogs' => $sales->sum('cost_of_goods_sold'),
-            'average_sale_value' => $sales->count() > 0 ? $sales->avg('total_amount') : 0,
-            'average_profit' => $sales->count() > 0 ? $sales->avg('gross_profit') : 0,
-            'profit_margin' => $sales->sum('total_amount') > 0
-                ? ($sales->sum('gross_profit') / $sales->sum('total_amount')) * 100
-                : 0,
-        ];
+        // Payment method breakdown via SQL
+        $paymentMethodBreakdown = (clone $query)
+            ->selectRaw('sale_type as method, COUNT(*) as count, SUM(total_amount) as total, SUM(gross_profit) as profit')
+            ->groupBy('sale_type')
+            ->get()
+            ->map(fn($row) => [
+                'method' => $row->method,
+                'count' => $row->count,
+                'total' => (float) $row->total,
+                'profit' => (float) $row->profit,
+            ]);
 
-        // Sales by payment method
-        $paymentMethodBreakdown = $sales->groupBy('sale_type')->map(function ($items, $method) {
-            return [
-                'method' => $method,
-                'count' => $items->count(),
-                'revenue' => $items->sum('total_amount'),
-                'profit' => $items->sum('gross_profit'),
-            ];
-        })->values();
+        // Hourly distribution via SQL
+        $hourlyDistribution = (clone $query)
+            ->selectRaw('HOUR(sale_date) as hour, COUNT(*) as count, SUM(total_amount) as total')
+            ->groupByRaw('HOUR(sale_date)')
+            ->orderBy('hour')
+            ->get()
+            ->map(fn($row) => [
+                'hour' => $row->hour,
+                'count' => $row->count,
+                'total' => (float) $row->total,
+            ]);
 
-        // Daily trend
-        $dailyTrend = [];
-        if (\Carbon\Carbon::parse($startDate)->diffInDays(\Carbon\Carbon::parse($endDate)) > 1) {
-            $dailyTrend = $sales->groupBy(function ($sale) {
-                return $sale->sale_date->format('Y-m-d');
-            })->map(function ($items, $date) {
-                return [
-                    'date' => $date,
-                    'count' => $items->count(),
-                    'revenue' => $items->sum('total_amount'),
-                    'profit' => $items->sum('gross_profit'),
-                    'cogs' => $items->sum('cost_of_goods_sold'),
-                ];
-            })->values();
-        }
-
-        // Top selling products (from sale items)
-        $topProducts = \DB::table('sale_items')
-            ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+        // Top selling products via SQL (limited)
+        $topProducts = (clone $query)
+            ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
             ->join('products', 'sale_items.product_id', '=', 'products.id')
-            ->whereBetween('sales.sale_date', [$startDate, $endDate])
-            ->select(
-                'products.id',
-                'products.name',
-                \DB::raw('SUM(sale_items.quantity) as total_quantity'),
-                \DB::raw('SUM(sale_items.line_total) as total_revenue'),
-                \DB::raw('SUM(sale_items.quantity * sale_items.unit_cost) as total_cost')
-            )
+            ->selectRaw('products.id, products.name, SUM(sale_items.quantity) as total_quantity, SUM(sale_items.line_total) as total_revenue, SUM(sale_items.quantity * sale_items.unit_cost) as total_cost')
             ->groupBy('products.id', 'products.name')
             ->orderByDesc('total_quantity')
             ->limit(10)
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'product_id' => $item->id,
-                    'product_name' => $item->name,
-                    'quantity_sold' => $item->total_quantity,
-                    'revenue' => $item->total_revenue,
-                    'cost' => $item->total_cost,
-                    'profit' => $item->total_revenue - $item->total_cost,
-                ];
-            });
+            ->get();
+
+        $totalRevenue = (float) ($summaryData->total_revenue ?? 0);
+        $totalProfit = (float) ($summaryData->total_profit ?? 0);
+
+        $summary = [
+            'total_sales' => (int) ($summaryData->total_sales ?? 0),
+            'total_orders' => (int) ($summaryData->total_sales ?? 0),
+            'total_revenue' => $totalRevenue,
+            'total_profit' => $totalProfit,
+            'total_cogs' => (float) ($summaryData->total_cogs ?? 0),
+            'average_sale_value' => (float) ($summaryData->average_sale_value ?? 0),
+            'average_profit' => (float) ($summaryData->average_profit ?? 0),
+            'profit_margin' => $totalRevenue > 0 ? ($totalProfit / $totalRevenue) * 100 : 0,
+        ];
+
+        // Daily trend via SQL aggregation
+        $dailyTrend = [];
+        if (\Carbon\Carbon::parse($startDate)->diffInDays(\Carbon\Carbon::parse($endDate)) > 1) {
+            $dailyTrend = (clone $query)
+                ->selectRaw('DATE(sale_date) as date, COUNT(*) as count, SUM(total_amount) as revenue, SUM(gross_profit) as profit, SUM(cost_of_goods_sold) as cogs')
+                ->groupByRaw('DATE(sale_date)')
+                ->orderBy('date')
+                ->get()
+                ->map(fn($row) => [
+                    'date' => $row->date,
+                    'count' => $row->count,
+                    'revenue' => (float) $row->revenue,
+                    'profit' => (float) $row->profit,
+                    'cogs' => (float) $row->cogs,
+                ]);
+        }
+
+        // Map topProducts to expected format
+        $topProductsFormatted = $topProducts->map(fn($item) => [
+            'product_id' => $item->id,
+            'product_name' => $item->name,
+            'quantity_sold' => (int) $item->total_quantity,
+            'revenue' => (float) $item->total_revenue,
+            'cost' => (float) $item->total_cost,
+            'profit' => (float) ($item->total_revenue - $item->total_cost),
+        ]);
 
         return response()->json([
             'summary' => $summary,
             'payment_method_breakdown' => $paymentMethodBreakdown,
             'daily_trend' => $dailyTrend,
-            'top_products' => $topProducts,
+            'top_products' => $topProductsFormatted,
             'period' => [
                 'start' => $startDate,
                 'end' => $endDate,
@@ -312,6 +472,11 @@ class SaleController extends Controller
     {
         $query = Sale::with(['cashier', 'items.product']);
 
+        // Exclude voided sales by default unless explicitly requested
+        if (!$request->boolean('include_voided')) {
+            $query->where('status', '!=', 'voided');
+        }
+
         if ($request->filled('start_date')) {
             $query->whereDate('sale_date', '>=', $request->start_date);
         }
@@ -323,14 +488,23 @@ class SaleController extends Controller
 
         $format = $request->get('format', 'csv');
 
-        // Calculate summary for PDF
+        // Calculate summary for PDF using SQL aggregation instead of collection
+        $summaryQuery = Sale::where('status', '!=', 'voided');
+        if ($request->filled('start_date')) {
+            $summaryQuery->whereDate('sale_date', '>=', $request->start_date);
+        }
+        if ($request->filled('end_date')) {
+            $summaryQuery->whereDate('sale_date', '<=', $request->end_date);
+        }
+        $summaryData = $summaryQuery->selectRaw('COUNT(*) as total_sales, COALESCE(SUM(total_amount), 0) as total_revenue, COALESCE(SUM(gross_profit), 0) as total_profit, COALESCE(SUM(cost_of_goods_sold), 0) as total_cogs')->first();
+
         $summary = [
-            'total_sales' => $sales->count(),
-            'total_revenue' => $sales->sum('total_amount'),
-            'total_profit' => $sales->sum('gross_profit'),
-            'total_cogs' => $sales->sum('cost_of_goods_sold'),
-            'profit_margin' => $sales->sum('total_amount') > 0
-                ? ($sales->sum('gross_profit') / $sales->sum('total_amount')) * 100
+            'total_sales' => (int) $summaryData->total_sales,
+            'total_revenue' => (float) $summaryData->total_revenue,
+            'total_profit' => (float) $summaryData->total_profit,
+            'total_cogs' => (float) $summaryData->total_cogs,
+            'profit_margin' => $summaryData->total_revenue > 0
+                ? ($summaryData->total_profit / $summaryData->total_revenue) * 100
                 : 0,
         ];
 
@@ -448,10 +622,43 @@ class SaleController extends Controller
             ], 422);
         }
 
-        $sale->delete();
+        return DB::transaction(function () use ($sale, $user) {
+            // Load items within transaction
+            $sale->load('items');
 
-        return response()->json([
-            'message' => 'Sale deleted successfully',
-        ]);
+            // Restore stock for each item with row locks
+            // Use conversion_factor to restore correct base-unit quantity
+            foreach ($sale->items as $item) {
+                $product = Product::lockForUpdate()->find($item->product_id);
+                if ($product) {
+                    $conversionFactor = $item->conversion_factor ?? 1;
+                    $quantityInBaseUnits = $item->quantity * $conversionFactor;
+
+                    $previousStock = $product->stock_quantity;
+                    $product->increment('stock_quantity', $quantityInBaseUnits);
+                    $product->refresh();
+
+                    StockMovement::create([
+                        'product_id' => $product->id,
+                        'user_id' => $user->id,
+                        'type' => 'return',
+                        'quantity' => $quantityInBaseUnits,
+                        'previous_stock' => $previousStock,
+                        'new_stock' => $product->stock_quantity,
+                        'reference_type' => 'sale_delete',
+                        'reference_id' => $sale->id,
+                        'notes' => "Stock restored from deleted sale {$sale->sale_number}",
+                    ]);
+                }
+            }
+
+            $sale->delete();
+
+            AuditLog::log('sale.delete', $sale, null, null, "Sale {$sale->sale_number} deleted");
+
+            return response()->json([
+                'message' => 'Sale deleted successfully',
+            ]);
+        });
     }
 }

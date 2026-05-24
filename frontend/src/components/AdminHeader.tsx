@@ -23,7 +23,7 @@ export default function AdminHeader() {
         <img src={navbarLogo} alt="Brilliant POS" className="h-24 w-auto" />
 
         <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">{roleLabel}</span>
+          <span className="text-xs text-muted-foreground dark:text-muted-foreground/80">{roleLabel}</span>
           <Button
             variant="ghost"
             size="icon"

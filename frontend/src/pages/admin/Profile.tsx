@@ -180,16 +180,16 @@ export default function Profile() {
   if (!profile) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-muted-foreground">Profile not found</p>
+        <p className="text-muted-foreground dark:text-muted-foreground/80">Profile not found</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="p-4 md:p-6 space-y-6 max-w-4xl">
       <div>
         <h1 className="text-3xl font-bold">My Profile</h1>
-        <p className="text-muted-foreground mt-1">
+        <p className="text-muted-foreground dark:text-muted-foreground/80 mt-1">
           Manage your personal information and account settings
         </p>
       </div>
@@ -208,7 +208,7 @@ export default function Profile() {
             </div>
             <div className="flex-1">
               <h2 className="text-2xl font-semibold">{profile.name}</h2>
-              <p className="text-muted-foreground">{profile.email}</p>
+              <p className="text-muted-foreground dark:text-muted-foreground/80">{profile.email}</p>
               <div className="flex items-center gap-2 mt-3">
                 <Badge variant={profile.role === "owner" ? "default" : "secondary"}>
                   {profile.role === "owner" ? (
@@ -273,7 +273,7 @@ export default function Profile() {
                           </span>
                         </Button>
                       </Label>
-                      <p className="text-xs text-muted-foreground mt-1">
+                      <p className="text-xs text-muted-foreground dark:text-muted-foreground/80 mt-1">
                         JPG, PNG or GIF. Max size 2MB
                       </p>
                     </div>
@@ -286,7 +286,7 @@ export default function Profile() {
                 <div className="space-y-2">
                   <Label htmlFor="name">Full Name</Label>
                   <div className="relative">
-                    <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                     <Input
                       id="name"
                       className="pl-10"
@@ -304,7 +304,7 @@ export default function Profile() {
                 <div className="space-y-2">
                   <Label htmlFor="email">Email Address</Label>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                     <Input
                       id="email"
                       type="email"
@@ -372,7 +372,7 @@ export default function Profile() {
                 <div className="space-y-2">
                   <Label htmlFor="current_password">Current Password</Label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                     <Input
                       id="current_password"
                       type="password"
@@ -396,7 +396,7 @@ export default function Profile() {
                 <div className="space-y-2">
                   <Label htmlFor="password">New Password</Label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                     <Input
                       id="password"
                       type="password"
@@ -410,7 +410,7 @@ export default function Profile() {
                       placeholder="Enter new password"
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground dark:text-muted-foreground/80">
                     Must be at least 8 characters long
                   </p>
                 </div>
@@ -419,7 +419,7 @@ export default function Profile() {
                 <div className="space-y-2">
                   <Label htmlFor="password_confirmation">Confirm New Password</Label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground dark:text-muted-foreground/80" />
                     <Input
                       id="password_confirmation"
                       type="password"

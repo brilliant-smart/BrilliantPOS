@@ -3,13 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Expense;
+use App\Traits\EscapesLikeWildcards;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
 
 class ExpenseController extends Controller
 {
+    use EscapesLikeWildcards;
     /**
      * Display a listing of expenses with filtering and pagination.
      */
@@ -19,7 +22,7 @@ class ExpenseController extends Controller
 
         // Search filter
         if ($request->has('search') && $request->search) {
-            $search = $request->search;
+            $search = $this->escapeLike($request->search);
             $query->where(function($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
                   ->orWhere('description', 'like', "%{$search}%")
@@ -92,6 +95,8 @@ class ExpenseController extends Controller
 
         $expense->load(['category', 'recorder']);
 
+        AuditLog::log('expense.create', $expense, null, $expense->toArray(), "Expense {$expense->expense_number} created");
+
         return response()->json([
             'message' => 'Expense recorded successfully',
             'expense' => $expense
@@ -112,6 +117,12 @@ class ExpenseController extends Controller
      */
     public function update(Request $request, Expense $expense)
     {
+        // Only owner/manager or the creator can update
+        $user = $request->user();
+        if (!in_array($user->role, ['owner', 'manager']) && $expense->recorded_by !== $user->id) {
+            return response()->json(['message' => 'You can only update your own expenses'], 403);
+        }
+
         $validator = Validator::make($request->all(), [
             'title' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
@@ -143,6 +154,8 @@ class ExpenseController extends Controller
             'notes',
         ]));
 
+        AuditLog::log('expense.update', $expense, null, $expense->toArray(), "Expense {$expense->expense_number} updated");
+
         $expense->load(['category', 'recorder']);
 
         return response()->json([
@@ -156,6 +169,14 @@ class ExpenseController extends Controller
      */
     public function destroy(Expense $expense)
     {
+        // Only owner/manager or the creator can delete
+        $user = request()->user();
+        if (!in_array($user->role, ['owner', 'manager']) && $expense->recorded_by !== $user->id) {
+            return response()->json(['message' => 'You can only delete your own expenses'], 403);
+        }
+
+        AuditLog::log('expense.delete', $expense, null, null, "Expense {$expense->expense_number} deleted");
+
         $expense->delete();
 
         return response()->json([
@@ -207,60 +228,70 @@ class ExpenseController extends Controller
                 $endDate = Carbon::now()->endOfMonth();
         }
 
-        // Get expenses for the period
-        $expenses = Expense::dateRange($startDate, $endDate)->get();
+        // Get expenses for the period — use SQL aggregation for summary
+        $summaryData = Expense::dateRange($startDate, $endDate)
+            ->selectRaw('COUNT(*) as total_expenses, COALESCE(SUM(amount), 0) as total_amount, COALESCE(AVG(amount), 0) as average_expense')
+            ->first();
 
-        // Calculate summary
         $summary = [
-            'total_expenses' => $expenses->count(),
-            'total_amount' => $expenses->sum('amount'),
-            'average_expense' => $expenses->count() > 0 ? $expenses->avg('amount') : 0,
+            'total_expenses' => (int) $summaryData->total_expenses,
+            'total_amount' => (float) $summaryData->total_amount,
+            'average_expense' => (float) $summaryData->average_expense,
         ];
 
-        // Payment method breakdown
-        $paymentBreakdown = $expenses->groupBy('payment_method')->map(function ($items, $method) {
-            return [
-                'method' => $method,
-                'count' => $items->count(),
-                'amount' => $items->sum('amount'),
-            ];
-        })->values();
+        // Payment method breakdown via SQL
+        $paymentBreakdown = Expense::dateRange($startDate, $endDate)
+            ->selectRaw('payment_method as method, COUNT(*) as count, SUM(amount) as amount')
+            ->groupBy('payment_method')
+            ->get()
+            ->map(fn($row) => [
+                'method' => $row->method,
+                'count' => $row->count,
+                'amount' => (float) $row->amount,
+            ]);
 
-        // Category breakdown
-        $categoryBreakdown = $expenses->groupBy('category_id')->map(function ($items) {
-            $category = $items->first()->category;
-            return [
-                'category_id' => $category ? $category->id : null,
-                'category_name' => $category ? $category->name : 'Uncategorized',
-                'category_color' => $category ? $category->color : '#6B7280',
-                'count' => $items->count(),
-                'amount' => $items->sum('amount'),
-            ];
-        })->values();
+        // Category breakdown via SQL with join
+        $categoryBreakdown = Expense::dateRange($startDate, $endDate)
+            ->join('expense_categories', 'expenses.category_id', '=', 'expense_categories.id')
+            ->selectRaw('expense_categories.id as category_id, expense_categories.name as category_name, COALESCE(expense_categories.color, \'#6B7280\') as category_color, COUNT(*) as count, SUM(expenses.amount) as amount')
+            ->groupBy('expense_categories.id', 'expense_categories.name', 'expense_categories.color')
+            ->get()
+            ->map(fn($row) => [
+                'category_id' => $row->category_id,
+                'category_name' => $row->category_name,
+                'category_color' => $row->category_color,
+                'count' => $row->count,
+                'amount' => (float) $row->amount,
+            ]);
 
-        // Top vendors
-        $topVendors = $expenses->filter(function ($expense) {
-            return !empty($expense->vendor);
-        })->groupBy('vendor')->map(function ($items, $vendor) {
-            return [
-                'vendor' => $vendor,
-                'count' => $items->count(),
-                'amount' => $items->sum('amount'),
-            ];
-        })->sortByDesc('amount')->take(5)->values();
+        // Top vendors via SQL
+        $topVendors = Expense::dateRange($startDate, $endDate)
+            ->whereNotNull('vendor')
+            ->where('vendor', '!=', '')
+            ->selectRaw('vendor, COUNT(*) as count, SUM(amount) as amount')
+            ->groupBy('vendor')
+            ->orderByDesc('amount')
+            ->limit(5)
+            ->get()
+            ->map(fn($row) => [
+                'vendor' => $row->vendor,
+                'count' => $row->count,
+                'amount' => (float) $row->amount,
+            ]);
 
-        // Daily trend (if period is longer than a day)
+        // Daily trend via SQL
         $dailyTrend = [];
         if (Carbon::parse($startDate)->diffInDays(Carbon::parse($endDate)) > 1) {
-            $dailyTrend = $expenses->groupBy(function ($expense) {
-                return $expense->expense_date->format('Y-m-d');
-            })->map(function ($items, $date) {
-                return [
-                    'date' => $date,
-                    'count' => $items->count(),
-                    'amount' => $items->sum('amount'),
-                ];
-            })->values();
+            $dailyTrend = Expense::dateRange($startDate, $endDate)
+                ->selectRaw('DATE(expense_date) as date, COUNT(*) as count, SUM(amount) as amount')
+                ->groupByRaw('DATE(expense_date)')
+                ->orderBy('date')
+                ->get()
+                ->map(fn($row) => [
+                    'date' => $row->date,
+                    'count' => $row->count,
+                    'amount' => (float) $row->amount,
+                ]);
         }
 
         return response()->json([

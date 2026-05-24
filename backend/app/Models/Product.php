@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Storage;
 class Product extends Model
 {
-    use SoftDeletes;
+    use HasFactory, SoftDeletes;
     protected $fillable = [
         'name',
         'slug',
@@ -97,6 +98,16 @@ class Product extends Model
     public function priceHistory(): HasMany
     {
         return $this->hasMany(ProductPriceHistory::class);
+    }
+
+    public function unitTypes(): HasMany
+    {
+        return $this->hasMany(ProductUnitType::class)->orderBy('sort_order')->orderBy('conversion_factor');
+    }
+
+    public function baseUnitType()
+    {
+        return $this->hasOne(ProductUnitType::class)->where('is_base', true);
     }
 
     /**
@@ -259,6 +270,47 @@ class Product extends Model
 
     protected static function booted()
     {
+        static::creating(function ($product) {
+            if (empty($product->slug)) {
+                $slug = \Illuminate\Support\Str::slug($product->name);
+                $originalSlug = $slug;
+                $count = 1;
+                while (static::where('slug', $slug)->whereNull('deleted_at')->exists()) {
+                    $slug = $originalSlug . '-' . $count;
+                    $count++;
+                }
+                $product->slug = $slug;
+            }
+
+            // Enforce uniqueness excluding soft-deletes (DB constraint can't do this with NULL)
+            if ($product->sku && static::where('sku', $product->sku)->whereNull('deleted_at')->exists()) {
+                throw new \Illuminate\Database\QueryException('', [], new \Exception('SKU already exists among active products'));
+            }
+        });
+
+        static::updating(function ($product) {
+            if ($product->isDirty('slug') && static::where('slug', $product->slug)->whereNull('deleted_at')->where('id', '!=', $product->id)->exists()) {
+                throw new \Illuminate\Database\QueryException('', [], new \Exception('Slug already exists among active products'));
+            }
+
+            if ($product->isDirty('sku') && $product->sku && static::where('sku', $product->sku)->whereNull('deleted_at')->where('id', '!=', $product->id)->exists()) {
+                throw new \Illuminate\Database\QueryException('', [], new \Exception('SKU already exists among active products'));
+            }
+        });
+
+        static::created(function ($product) {
+            if (!$product->unitTypes()->where('is_base', true)->exists()) {
+                $product->unitTypes()->create([
+                    'name' => 'Piece',
+                    'short_name' => 'pc',
+                    'conversion_factor' => 1,
+                    'selling_price' => $product->price ?? 0,
+                    'is_base' => true,
+                    'sort_order' => 0,
+                ]);
+            }
+        });
+
         static::deleting(function ($product) {
             if ($product->image_url) {
                 if (app()->environment('production')) {

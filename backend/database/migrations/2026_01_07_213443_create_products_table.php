@@ -17,6 +17,7 @@ return new class extends Migration
             $table->text('description')->nullable();
             $table->string('image_url')->nullable();
             $table->foreignId('department_id')
+                ->nullable()
                 ->constrained()
                 ->cascadeOnDelete();
             $table->boolean('is_active')->default(true);
